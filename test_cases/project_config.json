@@ -1,0 +1,65 @@
+{
+  "project_info": {
+    "name": "ETL Pipeline Test",
+    "version": "2.0.0",
+    "description": "Comprehensive document processing system",
+    "author": "ETL Team"
+  },
+  "test_data": {
+    "formats_supported": [
+      "text/plain",
+      "text/csv", 
+      "application/json",
+      "text/html",
+      "application/xml",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/pdf"
+    ],
+    "processing_stats": {
+      "total_files_processed": 1250,
+      "success_rate": 98.5,
+      "average_processing_time_ms": 342,
+      "error_count": 19
+    },
+    "performance_metrics": {
+      "text_handler": {
+        "accuracy": 99.2,
+        "speed": "excellent",
+        "memory_usage": "low"
+      },
+      "binary_handler": {
+        "xlsx": {
+          "structure_preservation": 97.8,
+          "formula_handling": 95.6,
+          "multi_sheet_support": true
+        },
+        "docx": {
+          "formatting_retention": 96.4,
+          "heading_detection": 98.9,
+          "table_extraction": 94.7
+        }
+      }
+    }
+  },
+  "test_scenarios": [
+    {
+      "id": "text_001",
+      "type": "plain_text",
+      "description": "Multi-paragraph text processing",
+      "expected_sections": 5
+    },
+    {
+      "id": "csv_001", 
+      "type": "structured_data",
+      "description": "Employee data with special characters",
+      "expected_rows": 10
+    },
+    {
+      "id": "mixed_001",
+      "type": "mixed_content",
+      "description": "HTML with embedded JSON and XML",
+      "complexity": "high"
+    }
+  ]
+}

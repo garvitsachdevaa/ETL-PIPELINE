@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ETL Pipeline Test HTML Document</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background-color: #f0f0f0; padding: 10px; }
+        .content { margin: 20px 0; }
+        .highlight { background-color: yellow; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ETL Pipeline HTML Test Document</h1>
+        <p>This document tests HTML content extraction and structure preservation.</p>
+    </div>
+
+    <div class="content">
+        <h2>Document Processing Capabilities</h2>
+        <p>The ETL pipeline should extract this content while preserving the semantic structure.</p>
+        
+        <h3>Key Features</h3>
+        <ul>
+            <li>HTML tag removal with content preservation</li>
+            <li>Table data extraction</li>
+            <li>Link and image reference handling</li>
+            <li>CSS and JavaScript content filtering</li>
+        </ul>
+
+        <h3>Test Data Table</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Component</th>
+                    <th>Status</th>
+                    <th>Performance</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Text Handler</td>
+                    <td>Active</td>
+                    <td>Excellent</td>
+                    <td>Supports multiple formats</td>
+                </tr>
+                <tr>
+                    <td>Binary Handler</td>
+                    <td>Enhanced</td>
+                    <td>Very Good</td>
+                    <td>XLSX and DOCX support added</td>
+                </tr>
+                <tr>
+                    <td>Mixed Handler</td>
+                    <td>Optimized</td>
+                    <td>Good</td>
+                    <td>XML/HTML distinction improved</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Embedded Content Test</h3>
+        <p>This paragraph contains <span class="highlight">highlighted text</span> and should be extracted properly.</p>
+        
+        <blockquote>
+            "The ETL pipeline demonstrates excellent capability in processing diverse document formats 
+            while maintaining data integrity and structure preservation."
+        </blockquote>
+
+        <h3>Links and References</h3>
+        <p>External link: <a href="https://example.com">Example Website</a></p>
+        <p>Internal reference: <a href="#section1">Go to Section 1</a></p>
+        <p>Image reference: <img src="test_image.png" alt="Test Image" width="100"></p>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 ETL Pipeline Project. Test document for content extraction validation.</p>
+    </footer>
+
+    <script>
+        // This JavaScript should be filtered out during processing
+        console.log("This script content should not appear in extracted text");
+        function testFunction() {
+            return "JavaScript content to be filtered";
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Core dependencies
+streamlit
+pandas
+
+# Text processing and detection
+chardet
+beautifulsoup4
+lxml
+
+# PDF processing
+PyPDF2
+PyMuPDF
+
+# Document processing
+python-docx==1.2.0
+openpyxl==3.1.5
+
+# Image processing
+Pillow

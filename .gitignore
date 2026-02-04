@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Output files
+outputs/
+data/ocr_outputs/
+cache/
+*.log
+
+# Test files and debugging (excluding test_cases directory)
+test_files/
+test_*.py
+debug_*.py
+trace_*.py
+*_test.py
+*_debug.py
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Dependencies
+node_modules/
+
+# Streamlit
+.streamlit/
+
+# Documentation artifacts
+*COMPLETE.md
+*_NOTES.md
+
+# Local test artifacts
+sample.png
+sample.*
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Coverage reports
+htmlcov/
+.coverage
+.pytest_cache/

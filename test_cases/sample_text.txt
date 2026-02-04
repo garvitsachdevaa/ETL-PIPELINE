@@ -1,0 +1,23 @@
+ETL Pipeline Test Document
+
+Introduction
+This is a comprehensive test document for the ETL pipeline text handler.
+It contains various text formatting and structure to validate the processing capabilities.
+
+Background Information
+The Enhanced Text Handler should properly extract and structure this content.
+Multiple paragraphs should be identified and processed as separate sections.
+
+Key Features to Test:
+- Multi-paragraph detection
+- Section heading recognition
+- Text normalization and cleanup
+- Character encoding handling
+- Line break processing
+
+Processing Validation
+This document serves as a baseline test case for plain text processing.
+The handler should preserve content structure while normalizing formatting.
+
+Conclusion
+Expected output: Multiple structured sections with proper metadata and confidence scoring.
