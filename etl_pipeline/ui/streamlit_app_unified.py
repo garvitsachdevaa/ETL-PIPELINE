@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 import time
 import json
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Add project root (etl_pipeline/) to sys.path so all imports work
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -39,6 +39,26 @@ def _warm_chandra():
     except Exception as e:
         return None  # GPU not available — Chandra will fall back gracefully
 
+
+@st.cache_resource(show_spinner="🧠 Loading PaliGemma layout model (first run only, ~6 GB)…")
+def _warm_paligemma():
+    """
+    Pre-load PaliGemma 2 model + processor into GPU VRAM via the same
+    singleton used by paligemma_adapter._load_model().
+
+    Calling this here (in @st.cache_resource) means:
+    - The model loads once when the Space starts, not during file processing.
+    - Subsequent layout detection calls use the already-loaded singleton.
+    - The Streamlit script thread is NEVER blocked by model download/loading
+      during active document processing.
+    """
+    try:
+        from handlers.vlm.paligemma_adapter import _load_model
+        return _load_model()  # warms the global singleton (_model, _processor)
+    except Exception:
+        return None  # No GPU / model unavailable — _run_vlm_layout will return None
+
+
 st.set_page_config(
     page_title="ETL Pipeline - Document Processing",
     page_icon="🔄",
@@ -48,8 +68,9 @@ st.set_page_config(
 def main():
     """Main unified interface for all ETL pipeline processing"""
 
-    # Pre-warm Chandra model on first load (cached — runs once per server restart)
+    # Pre-warm both models on first load (cached — runs once per server restart)
     _warm_chandra()
+    _warm_paligemma()
 
     # Header
     st.title("🔄 ETL Pipeline - Document Processing")
@@ -244,10 +265,11 @@ def process_single_file(uploaded_file):
             # Hint about what happens next for binary docs
             if doc.routing_target == "binary_handler":
                 mime = doc.mime_type or ""
-                if "pdf" in mime:
-                    st.write("📄 Extracting text blocks from PDF (instant for text PDFs, Chandra OCR for scanned)…")
-                elif "image" in mime:
-                    st.write("🧠 Running Chandra OCR on image…")
+                if "pdf" in mime or "image" in mime:
+                    st.write(
+                        "🧠 Step 1: PaliGemma detecting layout blocks (columns, headers, tables)…  "
+                        "\n⚡ Step 2: Chandra OCR on each detected block — this may take 30–90 s on first page."
+                    )
 
             # Step 2: Route to appropriate handler
             from handlers.text_handler import handle_text
