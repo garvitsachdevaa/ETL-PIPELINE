@@ -4,7 +4,7 @@ emoji: 🔄
 colorFrom: blue
 colorTo: purple
 sdk: streamlit
-sdk_version: "1.40.0"
+sdk_version: "1.54.0"
 app_file: etl_pipeline/ui/streamlit_app_unified.py
 pinned: false
 license: apache-2.0

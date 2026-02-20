@@ -2,7 +2,7 @@
 # Mirrors etl_pipeline/requirements.txt with GPU-ready dependencies.
 
 # ── Core ─────────────────────────────────────────────────────────────────────
-streamlit==1.40.0
+streamlit>=1.50.0
 pandas
 
 # ── Text processing ───────────────────────────────────────────────────────────

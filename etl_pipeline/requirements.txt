@@ -1,5 +1,5 @@
 # Core dependencies
-streamlit
+streamlit>=1.50.0
 pandas
 
 # Text processing and detection
