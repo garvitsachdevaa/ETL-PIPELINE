@@ -9,15 +9,28 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 # ── HuggingFace authentication ──────────────────────────────────────────────
-# On HF Spaces the HF_TOKEN secret is injected as an env var automatically.
-# This lets transformers download gated models (PaliGemma, Chandra).
-_hf_token = os.environ.get("HF_TOKEN")
+# Try all common env var names HF Spaces / users may have set.
+# transformers auto-reads HUGGING_FACE_HUB_TOKEN, so we set that too.
+import logging as _logging
+_auth_logger = _logging.getLogger(__name__)
+_hf_token = (
+    os.environ.get("HF_TOKEN")
+    or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    or os.environ.get("HUGGINGFACE_TOKEN")
+    or os.environ.get("HF_API_TOKEN")
+)
 if _hf_token:
+    # Expose under the name transformers reads automatically
+    os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf_token
+    os.environ["HF_TOKEN"] = _hf_token
     try:
         from huggingface_hub import login as _hf_login
         _hf_login(token=_hf_token, add_to_git_credential=False)
-    except Exception:
-        pass  # huggingface_hub not available or token invalid — model load will fail later
+        _auth_logger.info("HF login succeeded — gated model access enabled.")
+    except Exception as _e:
+        _auth_logger.warning(f"HF login call failed ({_e}) — token kwarg fallback will be used.")
+else:
+    _auth_logger.warning("No HF token found in env vars — gated models will fail to download.")
 
 import streamlit as st
 import pandas as pd
@@ -45,17 +58,12 @@ def _warm_paligemma():
     """
     Pre-load PaliGemma 2 model + processor into GPU VRAM via the same
     singleton used by paligemma_adapter._load_model().
-
-    Calling this here (in @st.cache_resource) means:
-    - The model loads once when the Space starts, not during file processing.
-    - Subsequent layout detection calls use the already-loaded singleton.
-    - The Streamlit script thread is NEVER blocked by model download/loading
-      during active document processing.
     """
     try:
         from handlers.vlm.paligemma_adapter import _load_model
         return _load_model()  # warms the global singleton (_model, _processor)
-    except Exception:
+    except Exception as e:
+        _auth_logger.error(f"PaliGemma failed to load: {e}")
         return None  # No GPU / model unavailable — _run_vlm_layout will return None
 
 
