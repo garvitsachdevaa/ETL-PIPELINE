@@ -1,5 +1,6 @@
 import io
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import List, Optional
 
 from PIL import Image
@@ -11,6 +12,9 @@ from handlers.xlsx_handler import handle_xlsx
 from handlers.vlm import run_layout_detection_on_pdf, run_layout_detection_on_image
 
 logger = logging.getLogger(__name__)
+
+# Seconds to wait for PaliGemma layout detection before falling back
+VLM_TIMEOUT_SECONDS = 120
 
 # Supported binary formats
 SUPPORTED_FORMATS = {
@@ -70,23 +74,34 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
 
 def _run_vlm_layout(doc: DocumentObject, format_type: str) -> Optional[List]:
     """
-    Run VLM layout detection to get bounding boxes per content block.
+    Run VLM layout detection with a timeout.
 
     Returns:
         - PDFs:   List[List[LayoutBlock]] — one inner list per page
         - images: List[LayoutBlock]
-        - None   — if VLM is unavailable or fails (triggers whole-page OCR fallback)
+        - None   — if VLM is unavailable, fails, or times out
     """
-    try:
+    def _detect():
         if format_type == 'pdf':
             return run_layout_detection_on_pdf(doc.raw_bytes)
         else:
             img = Image.open(io.BytesIO(doc.raw_bytes))
             return run_layout_detection_on_image(img)
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(_detect)
+            return future.result(timeout=VLM_TIMEOUT_SECONDS)
+    except FuturesTimeoutError:
+        logger.warning(
+            f"VLM layout detection timed out after {VLM_TIMEOUT_SECONDS}s for "
+            f"{doc.document_id}; falling back to whole-page Chandra OCR."
+        )
+        return None
     except Exception as exc:
         logger.warning(
             f"VLM layout detection failed for {doc.document_id} ({exc}); "
-            "falling back to whole-page OCR."
+            "falling back to whole-page Chandra OCR."
         )
         return None
 

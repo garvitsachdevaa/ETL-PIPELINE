@@ -52,11 +52,14 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
 
     try:
         import torch
-        from transformers import PaliGemmaForConditionalGeneration, AutoProcessor
+        from transformers import PaliGemmaForConditionalGeneration, PaliGemmaProcessor
 
         logger.info(f"Loading PaliGemma model: {model_id}")
 
-        _processor = AutoProcessor.from_pretrained(model_id)
+        # Use PaliGemmaProcessor directly instead of AutoProcessor.
+        # AutoProcessor.from_pretrained tries to discover a VideoImageProcessor
+        # config in transformers >=4.46 which causes an indefinite hang.
+        _processor = PaliGemmaProcessor.from_pretrained(model_id)
         _model = PaliGemmaForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
