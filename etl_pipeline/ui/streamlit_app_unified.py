@@ -229,9 +229,9 @@ def process_single_file(uploaded_file):
             if doc.routing_target == "binary_handler":
                 mime = doc.mime_type or ""
                 if "pdf" in mime:
-                    st.write("🔍 Checking for embedded text (instant) — only loads GPU models if scanned…")
+                    st.write("🧠 Running PaliGemma layout detection + Chandra OCR (first run downloads ~13 GB of models)…")
                 elif "image" in mime:
-                    st.write("🧠 Image detected — VLM + Chandra OCR (first run downloads ~13 GB of models)…")
+                    st.write("🧠 Running PaliGemma layout detection + Chandra OCR (first run downloads ~13 GB of models)…")
 
             # Step 2: Route to appropriate handler
             from handlers.text_handler import handle_text
