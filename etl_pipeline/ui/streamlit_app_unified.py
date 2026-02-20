@@ -170,15 +170,18 @@ def show_batch_interface(uploaded_files):
 def process_single_text(text_input):
     """Process text input with full pipeline processing"""
     try:
-        with st.spinner("Processing text..."):
+        with st.status("Processing text…", expanded=True) as _status:
+            st.write("📥 Ingesting text input…")
             # Step 1: Ingest
             doc = ingest(file=None, text=text_input)
-            
+            st.write(f"✅ Detected: **{doc.detected_format}** · routed to `{doc.routing_target}`")
+
             # Step 2: Route to appropriate handler
             from handlers.text_handler import handle_text
             from handlers.binary_handler import handle_binary
             from handlers.mixed_handler import handle_mixed
-            
+
+            st.write("⚙️ Running handler…")
             if doc.routing_target == "text_handler":
                 result = handle_text(doc)
             elif doc.routing_target == "binary_handler":
@@ -188,7 +191,10 @@ def process_single_text(text_input):
             else:
                 st.error(f"Unknown routing target: {doc.routing_target}")
                 return
-            
+
+            method = getattr(result, "metadata", {}).get("extraction_method", "")
+            st.write(f"✅ Done" + (f" · method: `{method}`" if method else ""))
+
             # Step 3: Generate full output
             output_data = {
                 "document_id": result.document_id,
@@ -201,8 +207,8 @@ def process_single_text(text_input):
                 },
                 "result": result.to_dict()
             }
+            _status.update(label="✅ Text processed!", state="complete", expanded=False)
 
-        st.success("✅ Text processed successfully!")
         show_processing_results(output_data, "text_input", result)
 
     except Exception as e:
@@ -213,15 +219,26 @@ def process_single_text(text_input):
 def process_single_file(uploaded_file):
     """Process single uploaded file with full pipeline processing"""
     try:
-        with st.spinner(f"Processing {uploaded_file.name}..."):
+        with st.status(f"Processing **{uploaded_file.name}** …", expanded=True) as _status:
             # Step 1: Ingest
+            st.write("📥 Loading and detecting format…")
             doc = ingest(file=uploaded_file, text=None)
-            
+            st.write(f"✅ Detected: **{doc.detected_format}** · `{doc.mime_type}` · routed to `{doc.routing_target}`")
+
+            # Hint about what happens next for binary docs
+            if doc.routing_target == "binary_handler":
+                mime = doc.mime_type or ""
+                if "pdf" in mime:
+                    st.write("🔍 Checking for embedded text (instant) — only loads GPU models if scanned…")
+                elif "image" in mime:
+                    st.write("🧠 Image detected — VLM + Chandra OCR (first run downloads ~13 GB of models)…")
+
             # Step 2: Route to appropriate handler
             from handlers.text_handler import handle_text
             from handlers.binary_handler import handle_binary
             from handlers.mixed_handler import handle_mixed
-            
+
+            st.write("⚙️ Running document handler…")
             if doc.routing_target == "text_handler":
                 result = handle_text(doc)
             elif doc.routing_target == "binary_handler":
@@ -231,7 +248,10 @@ def process_single_file(uploaded_file):
             else:
                 st.error(f"Unknown routing target: {doc.routing_target}")
                 return
-            
+
+            method = getattr(result, "metadata", {}).get("extraction_method", "")
+            st.write(f"✅ Extraction complete" + (f" · method: `{method}`" if method else ""))
+
             # Step 3: Generate full output
             output_data = {
                 "document_id": result.document_id,
@@ -245,8 +265,9 @@ def process_single_file(uploaded_file):
                 },
                 "result": result.to_dict()
             }
+            _status.update(label=f"✅ **{uploaded_file.name}** processed!",
+                           state="complete", expanded=False)
 
-        st.success(f"✅ File '{uploaded_file.name}' processed successfully!")
         show_processing_results(output_data, uploaded_file.name, result)
 
     except Exception as e:
