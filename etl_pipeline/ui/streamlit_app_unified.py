@@ -68,10 +68,6 @@ st.set_page_config(
 def main():
     """Main unified interface for all ETL pipeline processing"""
 
-    # Pre-warm both models on first load (cached — runs once per server restart)
-    _warm_chandra()
-    _warm_paligemma()
-
     # Header
     st.title("🔄 ETL Pipeline - Document Processing")
     st.markdown("**Comprehensive document processing system** - Upload single files, multiple files, or paste text directly")
@@ -268,7 +264,8 @@ def process_single_file(uploaded_file):
                 if "pdf" in mime or "image" in mime:
                     st.write(
                         "🧠 Step 1: PaliGemma detecting layout blocks (columns, headers, tables)…  "
-                        "\n⚡ Step 2: Chandra OCR on each detected block — this may take 30–90 s on first page."
+                        "\n⚡ Step 2: Chandra OCR on each detected block — "
+                        "first run loads models (~13 GB total, one-time), subsequent files are fast."
                     )
 
             # Step 2: Route to appropriate handler
