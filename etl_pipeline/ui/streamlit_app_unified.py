@@ -5,8 +5,19 @@ import time
 import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
-# Add project root to sys.path
+# Add project root (etl_pipeline/) to sys.path so all imports work
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+# ── HuggingFace authentication ──────────────────────────────────────────────
+# On HF Spaces the HF_TOKEN secret is injected as an env var automatically.
+# This lets transformers download gated models (PaliGemma, Chandra).
+_hf_token = os.environ.get("HF_TOKEN")
+if _hf_token:
+    try:
+        from huggingface_hub import login as _hf_login
+        _hf_login(token=_hf_token, add_to_git_credential=False)
+    except Exception:
+        pass  # huggingface_hub not available or token invalid — model load will fail later
 
 import streamlit as st
 import pandas as pd
@@ -271,62 +282,166 @@ def show_processing_results(output_data, source_name, result):
 
 def show_extracted_content(result):
     """Display the extracted and processed content"""
-    # Handle both TextDocument (sections) and BinaryDocument (pages/regions)
-    if hasattr(result, 'sections') and result.sections:
-        st.subheader(f"📄 Extracted Sections ({len(result.sections)})")
-        sections_to_process = result.sections
-    elif hasattr(result, 'pages') and result.pages:
-        # Count total regions across all pages
-        total_regions = sum(len(page.regions) for page in result.pages)
-        st.subheader(f"📄 Extracted Content ({total_regions} regions from {len(result.pages)} pages)")
-        # Flatten regions from all pages for display
-        sections_to_process = []
-        for page in result.pages:
-            for region in page.regions:
-                # Convert region to section-like object for display
-                section_like = type('Section', (), {
-                    'content': region.text,
-                    'metadata': {**region.metadata, 'page_number': page.page_number, 'confidence': region.confidence}
-                })()
-                sections_to_process.append(section_like)
-    else:
-        st.info("No structured content extracted")
+
+    # ── BinaryDocument (PDF / image) ────────────────────────────────────────
+    if hasattr(result, 'pages') and result.pages:
+        _show_binary_content(result)
         return
-    
-    if sections_to_process:
-        
-        # Show sections with search and filtering
-        if len(sections_to_process) > 5:
-            search_term = st.text_input("🔍 Search sections:", placeholder="Enter keywords to filter sections...")
-            if search_term:
-                filtered_sections = [s for s in sections_to_process if search_term.lower() in s.content.lower()]
-                st.info(f"Found {len(filtered_sections)} sections matching '{search_term}'")
-                sections_to_show = filtered_sections[:10]
-            else:
-                sections_to_show = sections_to_process[:10]
+
+    # ── TextDocument (HTML, CSV, TXT, DOCX, …) ──────────────────────────────
+    if hasattr(result, 'sections') and result.sections:
+        _show_text_content(result)
+        return
+
+    st.info("No structured content extracted")
+
+
+def _show_binary_content(result):
+    """Render a BinaryDocument: pages → blocks with VLM labels, titles and OCR text."""
+    total_blocks  = sum(len(p.blocks)  for p in result.pages)
+    total_regions = sum(len(p.regions) for p in result.pages)
+
+    # ── Top metrics ─────────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Pages",   len(result.pages))
+    c2.metric("Blocks",  total_blocks,  help="VLM-detected content blocks")
+    c3.metric("Regions", total_regions, help="Word-level OCR outputs")
+
+    # ── Global search ────────────────────────────────────────────────────────
+    search_term = st.text_input("🔍 Search OCR text:",
+                                placeholder="Filter blocks by keyword...")
+
+    st.markdown("---")
+
+    for page in result.pages:
+        blocks = page.blocks
+        if not blocks:
+            continue
+
+        # Filter by search term
+        if search_term:
+            blocks = [b for b in blocks
+                      if search_term.lower() in (b.raw_text or "").lower()
+                      or search_term.lower() in (b.title or "").lower()]
+            if not blocks:
+                continue
+
+        # ── Page header ──────────────────────────────────────────────────────
+        layout_guided = page.metadata.get("layout_guided", False)
+        badge = "🧠 VLM-guided" if layout_guided else "📄 Whole-page"
+        st.markdown(f"### 📄 Page {page.page_number}  `{badge}`")
+
+        for i, block in enumerate(blocks):
+            raw_text   = (block.raw_text or "").strip()
+            corr_text  = (block.corrected_text or "").strip()
+            label      = block.label or "unknown"
+            title      = block.title or ""
+            confidence = block.confidence
+            n_regions  = len(block.regions)
+
+            # Colour-code the label badge
+            LABEL_COLOURS = {
+                "header": "🔵", "footer": "⚫", "table": "🟠",
+                "figure": "🟣", "full_page": "⬜", "body": "🟢",
+            }
+            icon = LABEL_COLOURS.get(label, "🔷")
+
+            # Build expander title
+            conf_str  = f"{confidence:.0%}"
+            title_str = f" — {title}" if title else ""
+            expander_label = (
+                f"{icon} Block {i+1}  `{label}`{title_str}  "
+                f"· conf {conf_str}  · {n_regions} word(s)"
+            )
+
+            with st.expander(expander_label, expanded=(i == 0 and page.page_number == 1)):
+
+                # ── Block metadata strip ─────────────────────────────────────
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.markdown(f"**Label**  `{label}`")
+                mc2.markdown(f"**Title**  {title or '_(none)_'}")
+                mc3.markdown(f"**Confidence**  {conf_str}")
+                mc4.markdown(f"**BBox**  `{block.bbox}`")
+
+                st.markdown("---")
+
+                # ── OCR text ─────────────────────────────────────────────────
+                if raw_text:
+                    if corr_text and corr_text != raw_text:
+                        t1, t2 = st.tabs(["✏️ Corrected text", "📝 Raw OCR text"])
+                        with t1:
+                            st.text_area("", value=corr_text, height=150,
+                                         disabled=True,
+                                         key=f"corr_p{page.page_number}_b{i}")
+                        with t2:
+                            st.text_area("", value=raw_text, height=150,
+                                         disabled=True,
+                                         key=f"raw_p{page.page_number}_b{i}")
+                    else:
+                        st.text_area("📝 OCR text", value=raw_text, height=150,
+                                     disabled=True,
+                                     key=f"raw_p{page.page_number}_b{i}")
+                else:
+                    st.caption("_(no text extracted for this block)_")
+
+                # ── Word-level regions (collapsed) ───────────────────────────
+                if block.regions:
+                    with st.expander(f"🔤 Word-level regions ({n_regions})",
+                                     expanded=False):
+                        rows = [
+                            {
+                                "word":       r.text,
+                                "confidence": f"{r.confidence:.2f}",
+                                "bbox":       str(r.bbox),
+                            }
+                            for r in block.regions
+                        ]
+                        st.dataframe(pd.DataFrame(rows),
+                                     use_container_width=True,
+                                     hide_index=True)
+
+        if search_term:
+            st.caption(f"Showing {len(blocks)} matching block(s) on page {page.page_number}")
+
+        st.markdown("---")
+
+
+def _show_text_content(result):
+    """Render a TextDocument: sections with search and filtering."""
+    sections_to_process = result.sections
+    st.subheader(f"📄 Extracted Sections ({len(sections_to_process)})")
+
+    if len(sections_to_process) > 5:
+        search_term = st.text_input("🔍 Search sections:",
+                                    placeholder="Enter keywords to filter sections...")
+        if search_term:
+            filtered = [s for s in sections_to_process
+                        if search_term.lower() in s.content.lower()]
+            st.info(f"Found {len(filtered)} sections matching '{search_term}'")
+            sections_to_show = filtered[:10]
         else:
-            sections_to_show = sections_to_process
-        
-        for i, section in enumerate(sections_to_show):
-            # Handle both section objects and region-like objects
-            section_id = getattr(section, 'section_id', f'region_{i}')
-            format_type = getattr(section, 'format_type', 'extracted_content')
-            
-            with st.expander(f"Section {i+1}: {format_type} ({section_id[:8]}...)", 
-                           expanded=(i < 3)):
-                st.write("**Content:**")
-                content_preview = section.content[:500] + "..." if len(section.content) > 500 else section.content
-                st.text_area("", value=content_preview, height=100, disabled=True, key=f"content_{i}")
-                
-                if hasattr(section, 'metadata') and section.metadata:
-                    st.write("**Metadata:**")
-                    st.json(section.metadata, expanded=False)
-        
-        if len(sections_to_process) > len(sections_to_show):
-            st.info(f"📝 Showing {len(sections_to_show)} of {len(sections_to_process)} sections. Download full results to see all content.")
-        
-        if len(sections_to_process) > len(sections_to_show):
-            st.info(f"📝 Showing {len(sections_to_show)} of {len(sections_to_process)} sections. Download full results to see all content.")
+            sections_to_show = sections_to_process[:10]
+    else:
+        sections_to_show = sections_to_process
+
+    for i, section in enumerate(sections_to_show):
+        section_id  = getattr(section, 'section_id',  f'section_{i}')
+        format_type = getattr(section, 'format_type', 'extracted_content')
+
+        with st.expander(f"Section {i+1}: {format_type} ({section_id[:8]}...)",
+                         expanded=(i < 3)):
+            st.write("**Content:**")
+            preview = (section.content[:500] + "..."
+                       if len(section.content) > 500 else section.content)
+            st.text_area("", value=preview, height=100, disabled=True,
+                         key=f"sec_content_{i}")
+            if hasattr(section, 'metadata') and section.metadata:
+                st.write("**Metadata:**")
+                st.json(section.metadata, expanded=False)
+
+    if len(sections_to_process) > len(sections_to_show):
+        st.info(f"📝 Showing {len(sections_to_show)} of {len(sections_to_process)} "
+                f"sections. Download full results to see all content.")
 
 def show_technical_details(output_data):
     """Show technical processing details"""
@@ -360,12 +475,26 @@ def show_export_options(output_data, source_name, result):
     with col_down2:
         # Simple text export of just the content
         if hasattr(result, 'sections'):
-            text_content = "\n\n".join([f"=== {section.format_type.upper()} SECTION ===\n{section.content}" 
-                                       for section in result.sections])
+            text_content = "\n\n".join(
+                [f"=== {section.format_type.upper()} SECTION ===\n{section.content}"
+                 for section in result.sections]
+            )
         elif hasattr(result, 'pages'):
-            text_content = "\n\n".join([f"=== PAGE {page.page_number} ===\n" + 
-                                       "\n".join([region.text for region in page.regions]) 
-                                       for page in result.pages])
+            page_parts = []
+            for page in result.pages:
+                block_texts = []
+                for block in page.blocks:
+                    text = (block.corrected_text or block.raw_text or "").strip()
+                    if text:
+                        header = f"[{block.label.upper()}]"
+                        if block.title:
+                            header += f" {block.title}"
+                        block_texts.append(f"{header}\n{text}")
+                if block_texts:
+                    page_parts.append(
+                        f"=== PAGE {page.page_number} ===\n" + "\n\n".join(block_texts)
+                    )
+            text_content = "\n\n".join(page_parts) if page_parts else "No extractable text found"
         else:
             text_content = "No extractable text content found"
         

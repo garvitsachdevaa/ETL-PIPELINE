@@ -1,3 +1,19 @@
+---
+title: ETL Pipeline
+emoji: 🔄
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.40.0"
+app_file: etl_pipeline/ui/streamlit_app_unified.py
+pinned: false
+license: apache-2.0
+suggested_hardware: a10g-small
+models:
+  - google/paligemma2-3b-pt-224
+  - datalab-to/chandra
+---
+
 # ETL Pipeline
 
 A comprehensive Extract, Transform, Load (ETL) pipeline for processing various document formats including text, binary documents (XLSX, DOCX, PDF), and mixed content with advanced format detection and structure preservation.

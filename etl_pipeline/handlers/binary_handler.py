@@ -1,10 +1,14 @@
+import io
 import logging
-from typing import List
+from typing import List, Optional
+
+from PIL import Image
 from ingestion.schemas import DocumentObject
 from handlers.binary_schema import BinaryDocument, Page
 from handlers.ocr.dispatcher import run_ocr
 from handlers.docx_handler import handle_docx
 from handlers.xlsx_handler import handle_xlsx
+from handlers.vlm import run_layout_detection_on_pdf, run_layout_detection_on_image
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +43,11 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
         if format_type == 'xlsx':
             return handle_xlsx(doc)
         
-        # Handle PDF and image formats with OCR (currently using PyPDF2 fallback)
+        # Handle PDF and image formats: VLM layout detection → block-aware OCR
         if format_type in ['pdf', 'image']:
-            pages = run_ocr(doc)
-            
+            layout_blocks = _run_vlm_layout(doc, format_type)
+            pages = run_ocr(doc, layout_blocks=layout_blocks)
+
             return BinaryDocument(
                 document_id=doc.document_id,
                 pages=pages,
@@ -52,8 +57,8 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
                     "format_type": format_type,
                     "pages_count": len(pages),
                     "file_size": len(doc.raw_bytes),
-                    "extraction_method": "ocr_fallback",
-                    "engine": "pypdf2_placeholder"
+                    "extraction_method": "vlm_layout_ocr" if layout_blocks else "ocr_fallback",
+                    "vlm_layout_guided": layout_blocks is not None,
                 }
             )
         
@@ -62,6 +67,29 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
     except Exception as e:
         logger.error(f"Failed to handle binary document {doc.document_id}: {e}")
         return _create_empty_binary_doc(doc, f"Processing failed: {str(e)}")
+
+def _run_vlm_layout(doc: DocumentObject, format_type: str) -> Optional[List]:
+    """
+    Run VLM layout detection to get bounding boxes per content block.
+
+    Returns:
+        - PDFs:   List[List[LayoutBlock]] — one inner list per page
+        - images: List[LayoutBlock]
+        - None   — if VLM is unavailable or fails (triggers whole-page OCR fallback)
+    """
+    try:
+        if format_type == 'pdf':
+            return run_layout_detection_on_pdf(doc.raw_bytes)
+        else:
+            img = Image.open(io.BytesIO(doc.raw_bytes))
+            return run_layout_detection_on_image(img)
+    except Exception as exc:
+        logger.warning(
+            f"VLM layout detection failed for {doc.document_id} ({exc}); "
+            "falling back to whole-page OCR."
+        )
+        return None
+
 
 def _create_empty_binary_doc(doc: DocumentObject, error_message: str) -> BinaryDocument:
     """Create an empty binary document with error information"""

@@ -1,0 +1,33 @@
+# Root requirements.txt — read by HuggingFace Spaces at build time.
+# Mirrors etl_pipeline/requirements.txt with GPU-ready dependencies.
+
+# ── Core ─────────────────────────────────────────────────────────────────────
+streamlit==1.40.0
+pandas
+
+# ── Text processing ───────────────────────────────────────────────────────────
+chardet
+beautifulsoup4
+lxml
+
+# ── PDF processing ────────────────────────────────────────────────────────────
+PyPDF2
+PyMuPDF
+
+# ── Document processing ───────────────────────────────────────────────────────
+python-docx==1.2.0
+openpyxl==3.1.5
+
+# ── Image processing ──────────────────────────────────────────────────────────
+Pillow
+
+# ── Chandra OCR (VLM-based, GPU required) ─────────────────────────────────────
+chandra-ocr>=0.1.8
+
+# ── Phase 2 — VLM Layout Detection (PaliGemma 2) ─────────────────────────────
+transformers>=4.46.0
+accelerate>=0.30.0
+bitsandbytes>=0.43.0
+torch>=2.2.0
+sentencepiece          # PaliGemma tokenizer
+huggingface_hub>=0.23.0  # HF_TOKEN login for gated models

@@ -17,3 +17,18 @@ openpyxl==3.1.5
 
 # Image processing
 Pillow
+
+# Chandra OCR (VLM-based, GPU required)
+chandra-ocr>=0.1.8
+
+# ── Phase 2 — VLM Layout Detection (Sprint 1) ──────────────────────────────
+# PaliGemma 2 model loading and inference
+transformers>=4.46.0
+accelerate>=0.30.0
+bitsandbytes>=0.43.0
+torch>=2.2.0
+sentencepiece          # PaliGemma tokenizer
+huggingface_hub>=0.23.0  # HF_TOKEN login for gated models
+
+# PDF rasterisation for VLM input (PyMuPDF already listed above; ensure version)
+# pymupdf is already declared above via PyMuPDF — no duplicate needed
