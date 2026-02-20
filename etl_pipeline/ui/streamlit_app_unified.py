@@ -243,7 +243,11 @@ def process_single_file(uploaded_file):
 
             # Hint about what happens next for binary docs
             if doc.routing_target == "binary_handler":
-                st.write("🧠 Running Chandra OCR (layout detection + text extraction)…")
+                mime = doc.mime_type or ""
+                if "pdf" in mime:
+                    st.write("📄 Extracting text blocks from PDF (instant for text PDFs, Chandra OCR for scanned)…")
+                elif "image" in mime:
+                    st.write("🧠 Running Chandra OCR on image…")
 
             # Step 2: Route to appropriate handler
             from handlers.text_handler import handle_text
