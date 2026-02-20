@@ -1,20 +1,13 @@
-import io
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from typing import List, Optional
+from typing import List
 
-from PIL import Image
 from ingestion.schemas import DocumentObject
-from handlers.binary_schema import BinaryDocument, Page, Block
+from handlers.binary_schema import BinaryDocument
 from handlers.ocr.dispatcher import run_ocr
 from handlers.docx_handler import handle_docx
 from handlers.xlsx_handler import handle_xlsx
-from handlers.vlm import run_layout_detection_on_pdf, run_layout_detection_on_image
 
 logger = logging.getLogger(__name__)
-
-# Seconds to wait for PaliGemma layout detection before falling back
-VLM_TIMEOUT_SECONDS = 120
 
 # Supported binary formats
 SUPPORTED_FORMATS = {
@@ -47,10 +40,12 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
         if format_type == 'xlsx':
             return handle_xlsx(doc)
         
-        # Handle PDF and image formats: always use VLM layout detection → Chandra OCR
+        # Handle PDF and image formats via Chandra OCR.
+        # Chandra is a VLM-based OCR model that performs layout detection
+        # internally and returns labelled, positioned blocks via its chunk
+        # output — no separate PaliGemma pass needed.
         if format_type in ['pdf', 'image']:
-            layout_blocks = _run_vlm_layout(doc, format_type)
-            pages = run_ocr(doc, layout_blocks=layout_blocks)
+            pages = run_ocr(doc, layout_blocks=None)
 
             return BinaryDocument(
                 document_id=doc.document_id,
@@ -61,8 +56,8 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
                     "format_type": format_type,
                     "pages_count": len(pages),
                     "file_size": len(doc.raw_bytes),
-                    "extraction_method": "vlm_layout_ocr" if layout_blocks else "ocr_fallback",
-                    "vlm_layout_guided": layout_blocks is not None,
+                    "extraction_method": "chandra_ocr",
+                    "vlm_layout_guided": False,
                 }
             )
         
@@ -71,40 +66,6 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
     except Exception as e:
         logger.error(f"Failed to handle binary document {doc.document_id}: {e}")
         return _create_empty_binary_doc(doc, f"Processing failed: {str(e)}")
-
-def _run_vlm_layout(doc: DocumentObject, format_type: str) -> Optional[List]:
-    """
-    Run VLM layout detection with a timeout.
-
-    Returns:
-        - PDFs:   List[List[LayoutBlock]] — one inner list per page
-        - images: List[LayoutBlock]
-        - None   — if VLM is unavailable, fails, or times out
-    """
-    def _detect():
-        if format_type == 'pdf':
-            return run_layout_detection_on_pdf(doc.raw_bytes)
-        else:
-            img = Image.open(io.BytesIO(doc.raw_bytes))
-            return run_layout_detection_on_image(img)
-
-    try:
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(_detect)
-            return future.result(timeout=VLM_TIMEOUT_SECONDS)
-    except FuturesTimeoutError:
-        logger.warning(
-            f"VLM layout detection timed out after {VLM_TIMEOUT_SECONDS}s for "
-            f"{doc.document_id}; falling back to whole-page Chandra OCR."
-        )
-        return None
-    except Exception as exc:
-        logger.warning(
-            f"VLM layout detection failed for {doc.document_id} ({exc}); "
-            "falling back to whole-page Chandra OCR."
-        )
-        return None
-
 
 def _create_empty_binary_doc(doc: DocumentObject, error_message: str) -> BinaryDocument:
     """Create an empty binary document with error information"""

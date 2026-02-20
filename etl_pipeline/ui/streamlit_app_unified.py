@@ -26,6 +26,19 @@ import pandas as pd
 from ingestion.batch_processor import BatchProcessor, _process_single_file_task
 from ingestion.loader import ingest
 
+
+# ---------------------------------------------------------------------------
+# Pre-warm Chandra model once per server start (cached, GPU loaded once)
+# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner="🧠 Loading Chandra OCR model (first run only, ~7 GB)…")
+def _warm_chandra():
+    """Load the Chandra InferenceManager singleton into the cache."""
+    try:
+        from handlers.ocr.chandra_adapter import _load_chandra_model
+        return _load_chandra_model()
+    except Exception as e:
+        return None  # GPU not available — Chandra will fall back gracefully
+
 st.set_page_config(
     page_title="ETL Pipeline - Document Processing",
     page_icon="🔄",
@@ -34,7 +47,10 @@ st.set_page_config(
 
 def main():
     """Main unified interface for all ETL pipeline processing"""
-    
+
+    # Pre-warm Chandra model on first load (cached — runs once per server restart)
+    _warm_chandra()
+
     # Header
     st.title("🔄 ETL Pipeline - Document Processing")
     st.markdown("**Comprehensive document processing system** - Upload single files, multiple files, or paste text directly")
@@ -227,11 +243,7 @@ def process_single_file(uploaded_file):
 
             # Hint about what happens next for binary docs
             if doc.routing_target == "binary_handler":
-                mime = doc.mime_type or ""
-                if "pdf" in mime:
-                    st.write("🧠 Running PaliGemma layout detection + Chandra OCR (first run downloads ~13 GB of models)…")
-                elif "image" in mime:
-                    st.write("🧠 Running PaliGemma layout detection + Chandra OCR (first run downloads ~13 GB of models)…")
+                st.write("🧠 Running Chandra OCR (layout detection + text extraction)…")
 
             # Step 2: Route to appropriate handler
             from handlers.text_handler import handle_text
