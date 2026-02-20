@@ -51,20 +51,36 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
         return _model, _processor
 
     try:
+        import os
         import torch
         from transformers import PaliGemmaForConditionalGeneration, PaliGemmaProcessor
+
+        # Ensure HF authentication is active before downloading gated weights.
+        # On HF Spaces the token is injected as HF_TOKEN env var.
+        hf_token = os.environ.get("HF_TOKEN")
+        if hf_token:
+            try:
+                from huggingface_hub import login as _hf_login
+                _hf_login(token=hf_token, add_to_git_credential=False)
+                logger.info("HF login successful for gated model access.")
+            except Exception as login_exc:
+                logger.warning(f"HF login failed ({login_exc}); will try token= kwarg.")
 
         logger.info(f"Loading PaliGemma model: {model_id}")
 
         # Use PaliGemmaProcessor directly instead of AutoProcessor.
         # AutoProcessor.from_pretrained tries to discover a VideoImageProcessor
         # config in transformers >=4.46 which causes an indefinite hang.
-        _processor = PaliGemmaProcessor.from_pretrained(model_id)
+        _processor = PaliGemmaProcessor.from_pretrained(
+            model_id,
+            token=hf_token,
+        )
         _model = PaliGemmaForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             device_map="cuda" if torch.cuda.is_available() else "cpu",
             low_cpu_mem_usage=True,
+            token=hf_token,
         )
         _model.eval()
         _loaded_model_id = model_id
