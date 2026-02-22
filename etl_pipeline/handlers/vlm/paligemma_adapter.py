@@ -27,14 +27,21 @@ DEFAULT_MODEL_ID = "google/paligemma2-3b-pt-224"
 # PaliGemma 2 requires the prompt to START with one <image> token per image.
 # Without it the processor warns and infers the token position, but the model
 # output is unreliable (often plain text rather than JSON).
+#
+# Coordinate convention: we ask for values in 0-1000 range (normalised ×1000).
+# This is model-friendly — PaliGemma 2 pt was pretrained with this convention.
+# We scale back to original pixel coords in detect_layout_blocks().
 LAYOUT_PROMPT = (
     "<image> "
-    "Identify all visually distinct content blocks in this document page. "
+    "Identify every visually distinct content region in this image. "
+    "Each column, sidebar, and main content area must be a SEPARATE block — "
+    "do NOT merge adjacent columns into one block. "
     "For each block return a JSON object: "
-    '{"label": "<semantic_label>", "bbox": [x0, y0, x1, y1]} '
-    "where bbox values are pixel coordinates of the block. "
-    "Possible labels: header, body, heading, table, figure, footer, caption. "
-    "Return ONLY a JSON array of all blocks, no other text."
+    '{"label": "<label>", "bbox": [x0, y0, x1, y1]} '
+    "where bbox values are integers in 0-1000 range (x=0 is left edge, x=1000 is right edge, "
+    "y=0 is top edge, y=1000 is bottom edge). "
+    "Labels: header, body, heading, table, figure, footer, caption, sidebar, column, navigation. "
+    "Return ONLY a valid JSON array of all blocks, no explanation, no markdown."
 )
 
 # ---------------------------------------------------------------------------
@@ -170,6 +177,11 @@ def detect_layout_blocks(
     try:
         import torch
 
+        # Record original size BEFORE processor resizes to 224×224.
+        # PaliGemma outputs coords in 0-1000 normalised space; we scale
+        # back to original pixel dimensions after parsing.
+        orig_w, orig_h = image.size
+
         model, processor = _load_model(model_id)
 
         inputs = processor(
@@ -186,7 +198,8 @@ def detect_layout_blocks(
             )
 
         raw_output = processor.decode(output_ids[0], skip_special_tokens=True)
-        logger.debug(f"PaliGemma raw output (page {page_number}): {raw_output[:300]}")
+        # Log at INFO so it's visible in HF Spaces logs for debugging
+        logger.info(f"PaliGemma raw output (page {page_number}): {raw_output[:500]}")
 
         blocks = _parse_vlm_output(raw_output)
 
@@ -196,6 +209,13 @@ def detect_layout_blocks(
             )
             return _whole_page_fallback(image)
 
+        # Scale bboxes from 0-1000 normalised space → original pixel coords
+        blocks = _scale_bboxes_to_image(blocks, orig_w, orig_h)
+        logger.info(
+            f"Page {page_number}: {len(blocks)} block(s) detected. "
+            f"Original size: {orig_w}×{orig_h}px. "
+            f"Blocks: {[b['label'] for b in blocks]}"
+        )
         return blocks
 
     except Exception as exc:
@@ -256,6 +276,37 @@ def _validate_blocks(blocks: list) -> List[dict]:
             b["bbox"] = [int(v) for v in bbox]
             valid.append(b)
     return valid
+
+
+def _scale_bboxes_to_image(blocks: List[dict], orig_w: int, orig_h: int) -> List[dict]:
+    """
+    Convert bboxes from PaliGemma's 0-1000 normalised coordinate space
+    to original image pixel coordinates.
+
+    PaliGemma 2 pt outputs bbox values in [0, 1000] where:
+      x=0 → left edge, x=1000 → right edge
+      y=0 → top edge,  y=1000 → bottom edge
+
+    If a model outputs raw 224-range coords instead (old behaviour), the
+    scaling is still applied — worst case a bbox slightly exceeds the image
+    edge and gets clamped by crop_image_to_block().
+    """
+    scaled = []
+    for b in blocks:
+        x0, y0, x1, y1 = b["bbox"]
+        # Detect if model used 224-range instead of 1000-range and normalise
+        coord_max = max(x0, y0, x1, y1)
+        norm = 1000.0 if coord_max > 224 else 224.0
+        scaled.append({
+            **b,
+            "bbox": [
+                int(x0 / norm * orig_w),
+                int(y0 / norm * orig_h),
+                int(x1 / norm * orig_w),
+                int(y1 / norm * orig_h),
+            ],
+        })
+    return scaled
 
 
 def _whole_page_fallback(image) -> List[dict]:
