@@ -72,31 +72,40 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
 
         logger.info(f"Loading PaliGemma model: {model_id}")
 
-        # Build PaliGemmaProcessor from its two sub-components instead of
-        # calling PaliGemmaProcessor.from_pretrained().
+        # WHY we construct the processor manually instead of from_pretrained:
         #
-        # WHY: from_pretrained downloads processor_config.json which lists
-        # a VideoImageProcessor entry. transformers >=4.46 then tries to
-        # instantiate that class — this hangs indefinitely because the video
-        # processing import chain triggers heavy lazy-loaded dependencies.
+        # PaliGemma's preprocessor_config.json lists BOTH SiglipImageProcessor
+        # AND VideoImageProcessor.  Any from_pretrained call on the model_id
+        # (including SiglipImageProcessor.from_pretrained and
+        # PaliGemmaProcessor.from_pretrained) downloads video_preprocessor_config
+        # then tries to instantiate VideoImageProcessor — this hangs indefinitely
+        # in transformers >=4.46 due to heavy lazy-loaded video deps.
         #
-        # Constructing manually from SiglipImageProcessor + AutoTokenizer
-        # never touches video_preprocessor_config.json at all.
+        # Fix: construct SiglipImageProcessor with known PaliGemma 2 3B-224 params
+        # directly (no from_pretrained, no preprocessor_config.json, no video).
         from transformers import (
             PaliGemmaForConditionalGeneration,
             PaliGemmaProcessor,
             SiglipImageProcessor,
             AutoTokenizer,
         )
-        logger.info("Loading SiglipImageProcessor...")
-        _image_processor = SiglipImageProcessor.from_pretrained(
-            model_id, token=hf_token
+
+        logger.info("Building SiglipImageProcessor from known PaliGemma 2 params...")
+        _image_processor = SiglipImageProcessor(
+            do_resize=True,
+            size={"height": 224, "width": 224},
+            resample=3,          # PIL.Image.BICUBIC
+            do_rescale=True,
+            rescale_factor=1 / 255,
+            do_normalize=True,
+            image_mean=[0.5, 0.5, 0.5],
+            image_std=[0.5, 0.5, 0.5],
         )
         logger.info("Loading tokenizer...")
         _tokenizer = AutoTokenizer.from_pretrained(
             model_id, token=hf_token
         )
-        logger.info("Assembling PaliGemmaProcessor from components...")
+        logger.info("Assembling PaliGemmaProcessor...")
         _processor = PaliGemmaProcessor(
             image_processor=_image_processor,
             tokenizer=_tokenizer,
