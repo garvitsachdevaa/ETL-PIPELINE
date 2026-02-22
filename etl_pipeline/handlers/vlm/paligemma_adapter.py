@@ -120,9 +120,14 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
         )
 
         # ── Model weights ──────────────────────────────────────────────────
-        # from_pretrained for the model downloads config.json + safetensors only.
-        # It does NOT download preprocessor_config.json.
-        logger.info("Downloading PaliGemma model weights (~6 GB, first run only)...")
+        # Enable verbose logging so tqdm progress bars appear in Space logs.
+        import os as _os
+        _os.environ["HUGGINGFACE_HUB_VERBOSITY"] = "info"
+        import transformers as _transformers
+        _transformers.logging.set_verbosity_info()
+        _transformers.logging.enable_progress_bar()
+
+        logger.info(">>> Downloading PaliGemma model weights (~6 GB) — watch progress bars below...")
         _model = PaliGemmaForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
@@ -130,6 +135,7 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
             low_cpu_mem_usage=True,
             token=hf_token,
         )
+        _transformers.logging.set_verbosity_error()  # quiet again after load
         _model.eval()
         _loaded_model_id = model_id
         logger.info(f"PaliGemma loaded on device: {next(_model.parameters()).device}")
