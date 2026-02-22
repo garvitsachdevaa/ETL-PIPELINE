@@ -72,25 +72,19 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
 
         logger.info(f"Loading PaliGemma model: {model_id}")
 
-        # WHY we construct the processor manually instead of from_pretrained:
-        #
-        # PaliGemma's preprocessor_config.json lists BOTH SiglipImageProcessor
-        # AND VideoImageProcessor.  Any from_pretrained call on the model_id
-        # (including SiglipImageProcessor.from_pretrained and
-        # PaliGemmaProcessor.from_pretrained) downloads video_preprocessor_config
-        # then tries to instantiate VideoImageProcessor — this hangs indefinitely
-        # in transformers >=4.46 due to heavy lazy-loaded video deps.
-        #
-        # Fix: construct SiglipImageProcessor with known PaliGemma 2 3B-224 params
-        # directly (no from_pretrained, no preprocessor_config.json, no video).
         from transformers import (
             PaliGemmaForConditionalGeneration,
             PaliGemmaProcessor,
             SiglipImageProcessor,
-            AutoTokenizer,
+            PreTrainedTokenizerFast,
         )
+        from huggingface_hub import hf_hub_download
 
-        logger.info("Building SiglipImageProcessor from known PaliGemma 2 params...")
+        # ── Image processor ────────────────────────────────────────────────
+        # Hardcoded params for paligemma2-3b-pt-224. Never calls from_pretrained
+        # on the model repo → never downloads preprocessor_config.json
+        # → never instantiates VideoImageProcessor → no hang.
+        logger.info("Building SiglipImageProcessor (hardcoded params)...")
         _image_processor = SiglipImageProcessor(
             do_resize=True,
             size={"height": 224, "width": 224},
@@ -101,16 +95,34 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
             image_mean=[0.5, 0.5, 0.5],
             image_std=[0.5, 0.5, 0.5],
         )
-        logger.info("Loading tokenizer...")
-        _tokenizer = AutoTokenizer.from_pretrained(
-            model_id, token=hf_token
+        # PaliGemmaProcessor.__init__ reads image_processor.image_seq_length.
+        # For paligemma2-3b-pt-224: (224 / patch_size)^2 = (224/14)^2 = 256.
+        _image_processor.image_seq_length = 256
+
+        # ── Tokenizer ──────────────────────────────────────────────────────
+        # Download ONLY tokenizer.json via hf_hub_download (single file).
+        # AutoTokenizer.from_pretrained does a full repo snapshot download
+        # which includes preprocessor_config.json → VideoImageProcessor hang.
+        # PreTrainedTokenizerFast(tokenizer_file=...) loads from one file only.
+        logger.info("Downloading tokenizer.json only (no preprocessor config)...")
+        _tokenizer_path = hf_hub_download(
+            repo_id=model_id,
+            filename="tokenizer.json",
+            token=hf_token,
         )
+        _tokenizer = PreTrainedTokenizerFast(tokenizer_file=_tokenizer_path)
+
+        # ── Assemble processor ─────────────────────────────────────────────
         logger.info("Assembling PaliGemmaProcessor...")
         _processor = PaliGemmaProcessor(
             image_processor=_image_processor,
             tokenizer=_tokenizer,
         )
-        logger.info("Loading PaliGemma model weights...")
+
+        # ── Model weights ──────────────────────────────────────────────────
+        # from_pretrained for the model downloads config.json + safetensors only.
+        # It does NOT download preprocessor_config.json.
+        logger.info("Downloading PaliGemma model weights (~6 GB, first run only)...")
         _model = PaliGemmaForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
