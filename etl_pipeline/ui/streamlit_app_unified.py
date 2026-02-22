@@ -8,11 +8,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 # Add project root (etl_pipeline/) to sys.path so all imports work
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+# ── Critical env vars — set before ANY other import ─────────────────────────
+# Prevents tokenizer deadlocks in Streamlit's multi-threaded environment.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 # ── HuggingFace authentication ──────────────────────────────────────────────
-# Try all common env var names HF Spaces / users may have set.
-# transformers auto-reads HUGGING_FACE_HUB_TOKEN, so we set that too.
-import logging as _logging
-_auth_logger = _logging.getLogger(__name__)
+print("[startup] authenticating with HuggingFace...", flush=True)
 _hf_token = (
     os.environ.get("HF_TOKEN")
     or os.environ.get("HUGGING_FACE_HUB_TOKEN")
@@ -20,59 +22,39 @@ _hf_token = (
     or os.environ.get("HF_API_TOKEN")
 )
 if _hf_token:
-    # Expose under the name transformers reads automatically
     os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf_token
     os.environ["HF_TOKEN"] = _hf_token
     try:
         from huggingface_hub import login as _hf_login
         _hf_login(token=_hf_token, add_to_git_credential=False)
-        _auth_logger.info("HF login succeeded — gated model access enabled.")
+        print("[startup] HF login succeeded.", flush=True)
     except Exception as _e:
-        _auth_logger.warning(f"HF login call failed ({_e}) — token kwarg fallback will be used.")
+        print(f"[startup] HF login failed: {_e}", flush=True)
 else:
-    _auth_logger.warning("No HF token found in env vars — gated models will fail to download.")
+    print("[startup] WARNING: no HF_TOKEN found — gated models will fail.", flush=True)
 
+print("[startup] importing streamlit...", flush=True)
 import streamlit as st
 import pandas as pd
 
-# Import lightweight modules only at module level.
-# Heavy handlers (binary_handler → vlm → transformers) are imported
-# lazily inside functions so a missing dep never crashes startup.
-from ingestion.loader import ingest
+print("[startup] importing ingestion.loader...", flush=True)
+try:
+    from ingestion.loader import ingest
+    print("[startup] ingest ok", flush=True)
+except Exception as _e:
+    print(f"[startup] FATAL: could not import ingest: {_e}", flush=True)
+    raise
 
-
-# ---------------------------------------------------------------------------
-# Pre-warm Chandra model once per server start (cached, GPU loaded once)
-# ---------------------------------------------------------------------------
-@st.cache_resource(show_spinner="🧠 Loading Chandra OCR model (first run only, ~7 GB)…")
-def _warm_chandra():
-    """Load the Chandra InferenceManager singleton into the cache."""
-    try:
-        from handlers.ocr.chandra_adapter import _load_chandra_model
-        return _load_chandra_model()
-    except Exception as e:
-        return None  # GPU not available — Chandra will fall back gracefully
-
-
-@st.cache_resource(show_spinner="🧠 Loading PaliGemma layout model (first run only, ~6 GB)…")
-def _warm_paligemma():
-    """
-    Pre-load PaliGemma 2 model + processor into GPU VRAM via the same
-    singleton used by paligemma_adapter._load_model().
-    """
-    try:
-        from handlers.vlm.paligemma_adapter import _load_model
-        return _load_model()  # warms the global singleton (_model, _processor)
-    except Exception as e:
-        _auth_logger.error(f"PaliGemma failed to load: {e}")
-        return None  # No GPU / model unavailable — _run_vlm_layout will return None
-
-
+# ── st.set_page_config MUST be the first st.* call ──────────────────────────
+# No @st.cache_resource or other st.* calls above this line.
 st.set_page_config(
     page_title="ETL Pipeline - Document Processing",
     page_icon="🔄",
     layout="wide"
 )
+
+print("[startup] app ready.", flush=True)
+
 
 def main():
     """Main unified interface for all ETL pipeline processing"""
