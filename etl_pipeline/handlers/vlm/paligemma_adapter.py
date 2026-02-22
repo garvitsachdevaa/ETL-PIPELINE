@@ -78,38 +78,54 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
             SiglipImageProcessor,
             PreTrainedTokenizerFast,
         )
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import snapshot_download
+
+        # ── Download repo snapshot, explicitly blocking video preprocessor ──
+        # PaliGemmaForConditionalGeneration.from_pretrained(model_id) in
+        # transformers >=4.46 internally fetches video_preprocessor_config.json
+        # and tries to instantiate VideoImageProcessor — hangs indefinitely.
+        # Fix: use snapshot_download with ignore_patterns to get a clean local
+        # copy WITHOUT the video preprocessor file, then load from local path.
+        # local_files_only=True on from_pretrained means no network calls at
+        # all after this — cannot fetch video_preprocessor_config.json.
+        logger.info(">>> Downloading model snapshot (~6 GB, video preprocessor excluded)...")
+        import transformers as _transformers
+        _transformers.logging.set_verbosity_info()
+        _transformers.logging.enable_progress_bar()
+
+        local_dir = snapshot_download(
+            repo_id=model_id,
+            token=hf_token,
+            ignore_patterns=[
+                "*video*",
+                "video_preprocessor_config.json",
+                "*.msgpack",
+                "flax_model*",
+                "tf_model*",
+                "rust_model*",
+            ],
+        )
+        logger.info(f"Snapshot ready at: {local_dir}")
+        _transformers.logging.set_verbosity_error()
 
         # ── Image processor ────────────────────────────────────────────────
-        # Hardcoded params for paligemma2-3b-pt-224. Never calls from_pretrained
-        # on the model repo → never downloads preprocessor_config.json
-        # → never instantiates VideoImageProcessor → no hang.
         logger.info("Building SiglipImageProcessor (hardcoded params)...")
         _image_processor = SiglipImageProcessor(
             do_resize=True,
             size={"height": 224, "width": 224},
-            resample=3,          # PIL.Image.BICUBIC
+            resample=3,
             do_rescale=True,
             rescale_factor=1 / 255,
             do_normalize=True,
             image_mean=[0.5, 0.5, 0.5],
             image_std=[0.5, 0.5, 0.5],
         )
-        # PaliGemmaProcessor.__init__ reads image_processor.image_seq_length.
-        # For paligemma2-3b-pt-224: (224 / patch_size)^2 = (224/14)^2 = 256.
-        _image_processor.image_seq_length = 256
+        _image_processor.image_seq_length = 256  # (224/14)^2 = 256 patches
 
         # ── Tokenizer ──────────────────────────────────────────────────────
-        # Download ONLY tokenizer.json via hf_hub_download (single file).
-        # AutoTokenizer.from_pretrained does a full repo snapshot download
-        # which includes preprocessor_config.json → VideoImageProcessor hang.
-        # PreTrainedTokenizerFast(tokenizer_file=...) loads from one file only.
-        logger.info("Downloading tokenizer.json only (no preprocessor config)...")
-        _tokenizer_path = hf_hub_download(
-            repo_id=model_id,
-            filename="tokenizer.json",
-            token=hf_token,
-        )
+        import os as _os
+        _tokenizer_path = _os.path.join(local_dir, "tokenizer.json")
+        logger.info(f"Loading tokenizer from local snapshot: {_tokenizer_path}")
         _tokenizer = PreTrainedTokenizerFast(tokenizer_file=_tokenizer_path)
 
         # ── Assemble processor ─────────────────────────────────────────────
@@ -119,23 +135,16 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
             tokenizer=_tokenizer,
         )
 
-        # ── Model weights ──────────────────────────────────────────────────
-        # Enable verbose logging so tqdm progress bars appear in Space logs.
-        import os as _os
-        _os.environ["HUGGINGFACE_HUB_VERBOSITY"] = "info"
-        import transformers as _transformers
-        _transformers.logging.set_verbosity_info()
-        _transformers.logging.enable_progress_bar()
-
-        logger.info(">>> Downloading PaliGemma model weights (~6 GB) — watch progress bars below...")
+        # ── Model weights — load from local snapshot, no network calls ─────
+        logger.info("Loading PaliGemma weights from local snapshot...")
         _model = PaliGemmaForConditionalGeneration.from_pretrained(
-            model_id,
+            local_dir,                   # local path, not repo id
             torch_dtype=torch.bfloat16,
             device_map="cuda" if torch.cuda.is_available() else "cpu",
             low_cpu_mem_usage=True,
-            token=hf_token,
+            local_files_only=True,       # never fetches anything from network
         )
-        _transformers.logging.set_verbosity_error()  # quiet again after load
+
         _model.eval()
         _loaded_model_id = model_id
         logger.info(f"PaliGemma loaded on device: {next(_model.parameters()).device}")
