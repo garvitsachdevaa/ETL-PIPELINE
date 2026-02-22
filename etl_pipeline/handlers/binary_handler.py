@@ -48,6 +48,18 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
             # authored (no dependence on internal text-stream structure).
             layout_blocks = _run_vlm_layout(doc, format_type)
 
+            # ── Free PaliGemma VRAM before Chandra loads ─────────────────────
+            # L4 GPU has 22 GB. PaliGemma (~6 GB) + Chandra (~7 GB) fit, but
+            # fragmentation pushes active usage to ~21 GB causing Chandra OOM.
+            # Unloading PaliGemma weights after layout detection frees ~6 GB
+            # before Chandra needs it, keeping peak usage under ~8 GB.
+            try:
+                from handlers.vlm import unload_model
+                unload_model()
+                logger.info("PaliGemma unloaded from VRAM before Chandra OCR.")
+            except Exception as _oom_e:
+                logger.warning(f"Could not unload PaliGemma ({_oom_e}); continuing.")
+
             # ── Step 2: Chandra OCR per detected block ───────────────────────
             # If layout_blocks is None (PaliGemma failed) Chandra falls back
             # to whole-page OCR automatically via run_ocr.

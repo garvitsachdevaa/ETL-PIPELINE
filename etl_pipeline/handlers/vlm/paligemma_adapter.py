@@ -24,12 +24,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 DEFAULT_MODEL_ID = "google/paligemma2-3b-pt-224"
 
+# PaliGemma 2 requires the prompt to START with one <image> token per image.
+# Without it the processor warns and infers the token position, but the model
+# output is unreliable (often plain text rather than JSON).
 LAYOUT_PROMPT = (
-    "Identify all visually distinct content blocks in this document. "
+    "<image> "
+    "Identify all visually distinct content blocks in this document page. "
     "For each block return a JSON object: "
     '{"label": "<semantic_label>", "bbox": [x0, y0, x1, y1]} '
-    "where bbox values are pixel coordinates. "
-    "Return a JSON array of all blocks."
+    "where bbox values are pixel coordinates of the block. "
+    "Possible labels: header, body, heading, table, figure, footer, caption. "
+    "Return ONLY a JSON array of all blocks, no other text."
 )
 
 # ---------------------------------------------------------------------------
@@ -221,8 +226,11 @@ def unload_model() -> None:
         _model = None
         _processor = None
         _loaded_model_id = None
+        import gc
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
         logger.info("PaliGemma model unloaded and VRAM cleared.")
     except Exception as exc:
         logger.warning(f"Error during model unload: {exc}")
