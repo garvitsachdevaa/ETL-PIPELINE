@@ -35,8 +35,9 @@ else:
 import streamlit as st
 import pandas as pd
 
-# Import from our modules
-from ingestion.batch_processor import BatchProcessor, _process_single_file_task
+# Import lightweight modules only at module level.
+# Heavy handlers (binary_handler → vlm → transformers) are imported
+# lazily inside functions so a missing dep never crashes startup.
 from ingestion.loader import ingest
 
 
@@ -576,6 +577,7 @@ def show_export_options(output_data, source_name, result):
 
 def process_batch_files(uploaded_files, max_workers, use_processes, save_outputs):
     """Process multiple files using batch logic"""
+    from ingestion.batch_processor import BatchProcessor, _process_single_file_task
     # Prepare files for the processor
     files_data = []
     for f in uploaded_files:

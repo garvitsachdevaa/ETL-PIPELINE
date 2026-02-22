@@ -1,5 +1,4 @@
 # Root requirements.txt — read by HuggingFace Spaces at build time.
-# Mirrors etl_pipeline/requirements.txt with GPU-ready dependencies.
 
 # ── Core ─────────────────────────────────────────────────────────────────────
 streamlit>=1.50.0
@@ -25,9 +24,9 @@ Pillow
 chandra-ocr>=0.1.8
 
 # ── Phase 2 — VLM Layout Detection (PaliGemma 2) ─────────────────────────────
+# bitsandbytes intentionally excluded — not used, CUDA build fails on L4
 transformers>=4.46.0
 accelerate>=0.30.0
-bitsandbytes>=0.43.0
 torch>=2.2.0
-sentencepiece          # PaliGemma tokenizer
-huggingface_hub>=0.23.0  # HF_TOKEN login for gated models
+sentencepiece
+huggingface_hub>=0.23.0
