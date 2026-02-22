@@ -131,8 +131,14 @@ def detect_layout_blocks_yolo(
             w, h = image.size
             return [{"label": "full_page", "bbox": [0, 0, w, h], "confidence": 0.0}]
 
-        # Sort top-to-bottom, left-to-right (reading order)
-        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
+        # Column-aware reading order:
+        #   1. Cluster blocks into vertical column bands by x-centre
+        #   2. Sort columns left → right
+        #   3. Within each column sort blocks top → bottom
+        # This prevents interleaving of adjacent columns (e.g. LinkedIn
+        # left sidebar, centre feed, right panel all mixed by raw y-sort).
+        image_width = image.size[0]
+        blocks = _column_aware_sort(blocks, image_width)
 
         logger.info(
             f"Page {page_number}: YOLO detected {len(blocks)} block(s) → "
@@ -174,6 +180,80 @@ def unload_yolo_model() -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _column_aware_sort(blocks: List[dict], image_width: int) -> List[dict]:
+    """
+    Sort blocks in natural reading order for multi-column layouts.
+
+    Algorithm:
+      1. Compute the x-centre of every block.
+      2. Use a simple 1-D gap scan on sorted x-centres to find column
+         boundaries: wherever the gap between consecutive x-centres exceeds
+         `col_gap_ratio * image_width` we declare a new column band.
+      3. Assign every block to its column band.
+      4. Final sort key: (column_index, y0) — left column first,
+         top-to-bottom within each column.
+
+    Works for 1, 2, 3 … N column layouts without needing to know N in
+    advance. Falls back gracefully to pure y-sort for single-column pages.
+
+    Args:
+        blocks:      List of block dicts with 'bbox' keys.
+        image_width: Pixel width of the source image (used to scale gap threshold).
+
+    Returns:
+        Reordered blocks list.
+    """
+    if len(blocks) <= 1:
+        return blocks
+
+    # Fraction of image width that counts as a column gap.
+    # 0.08 = 8 % — catches most multi-column layouts without false-splitting
+    # single-column text where blocks naturally have slight x variation.
+    COL_GAP_RATIO = 0.08
+    gap_threshold = image_width * COL_GAP_RATIO
+
+    # Compute x-centre for each block
+    x_centres = [(b["bbox"][0] + b["bbox"][2]) / 2 for b in blocks]
+
+    # Sort blocks by x-centre to find column band boundaries
+    sorted_by_x = sorted(zip(x_centres, range(len(blocks))), key=lambda t: t[0])
+
+    # Scan for gaps → column band boundaries
+    # col_starts[i] = x-centre value where column i begins
+    col_starts = [sorted_by_x[0][0]]
+    for i in range(1, len(sorted_by_x)):
+        prev_x = sorted_by_x[i - 1][0]
+        curr_x = sorted_by_x[i][0]
+        if curr_x - prev_x > gap_threshold:
+            col_starts.append(curr_x)
+
+    def _assign_column(x_centre: float) -> int:
+        """Return 0-based column index for a given x-centre."""
+        col = 0
+        for i, start in enumerate(col_starts):
+            # Use midpoint between adjacent column starts as the boundary
+            if i + 1 < len(col_starts):
+                boundary = (col_starts[i] + col_starts[i + 1]) / 2
+                if x_centre < boundary:
+                    return i
+            else:
+                return i
+        return col
+
+    # Assign column index to every block
+    for b, xc in zip(blocks, x_centres):
+        b["_col"] = _assign_column(xc)
+
+    # Final sort: column first, then y0 within column
+    blocks.sort(key=lambda b: (b["_col"], b["bbox"][1]))
+
+    # Clean up temporary key
+    for b in blocks:
+        b.pop("_col", None)
+
+    return blocks
+
 
 def _normalise_label(yolo_label: str) -> str:
     """
