@@ -58,7 +58,6 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
     try:
         import os
         import torch
-        from transformers import PaliGemmaForConditionalGeneration, PaliGemmaProcessor
 
         # Ensure HF authentication is active before downloading gated weights.
         # On HF Spaces the token is injected as HF_TOKEN env var.
@@ -73,13 +72,36 @@ def _load_model(model_id: str = DEFAULT_MODEL_ID) -> Tuple:
 
         logger.info(f"Loading PaliGemma model: {model_id}")
 
-        # Use PaliGemmaProcessor directly instead of AutoProcessor.
-        # AutoProcessor.from_pretrained tries to discover a VideoImageProcessor
-        # config in transformers >=4.46 which causes an indefinite hang.
-        _processor = PaliGemmaProcessor.from_pretrained(
-            model_id,
-            token=hf_token,
+        # Build PaliGemmaProcessor from its two sub-components instead of
+        # calling PaliGemmaProcessor.from_pretrained().
+        #
+        # WHY: from_pretrained downloads processor_config.json which lists
+        # a VideoImageProcessor entry. transformers >=4.46 then tries to
+        # instantiate that class — this hangs indefinitely because the video
+        # processing import chain triggers heavy lazy-loaded dependencies.
+        #
+        # Constructing manually from SiglipImageProcessor + AutoTokenizer
+        # never touches video_preprocessor_config.json at all.
+        from transformers import (
+            PaliGemmaForConditionalGeneration,
+            PaliGemmaProcessor,
+            SiglipImageProcessor,
+            AutoTokenizer,
         )
+        logger.info("Loading SiglipImageProcessor...")
+        _image_processor = SiglipImageProcessor.from_pretrained(
+            model_id, token=hf_token
+        )
+        logger.info("Loading tokenizer...")
+        _tokenizer = AutoTokenizer.from_pretrained(
+            model_id, token=hf_token
+        )
+        logger.info("Assembling PaliGemmaProcessor from components...")
+        _processor = PaliGemmaProcessor(
+            image_processor=_image_processor,
+            tokenizer=_tokenizer,
+        )
+        logger.info("Loading PaliGemma model weights...")
         _model = PaliGemmaForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
