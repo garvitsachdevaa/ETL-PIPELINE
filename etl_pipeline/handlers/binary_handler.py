@@ -26,8 +26,25 @@ SUPPORTED_FORMATS = {
     'application/vnd.ms-excel': 'xlsx'
 }
 
+# Minimum embedded-text characters across all pages to classify a PDF as
+# "text-based" (not scanned).  A scanned page may have stray OCR artifacts
+# of 10-50 chars; a real text page typically has hundreds.
+_TEXT_PDF_CHAR_THRESHOLD = 150
+
+
 def handle_binary(doc: DocumentObject) -> BinaryDocument:
-    """Handle binary documents with format-specific processing"""
+    """
+    Route binary documents to the correct extraction pipeline.
+
+    ┌──────────────────┬──────────────────┬───────────────────────┐
+    │   Text PDF       │  Scanned PDF /   │   DOCX / XLSX         │
+    │  (embedded text) │  Image           │                       │
+    ├──────────────────┼──────────────────┼───────────────────────┤
+    │  Marker          │  DocLayout-YOLO  │  Existing handlers    │
+    │  (layout+OCR     │  (layout blocks) │                       │
+    │  in one pass)    │  + Chandra OCR   │                       │
+    └──────────────────┴──────────────────┴───────────────────────┘
+    """
     try:
         if doc.mime_type not in SUPPORTED_FORMATS:
             logger.warning(f"Unsupported binary format: {doc.mime_type}")
@@ -41,49 +58,26 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
         if format_type == 'xlsx':
             return handle_xlsx(doc)
 
-        if format_type in ('pdf', 'image'):
-            # ── Step 1: PaliGemma visual layout detection ────────────────────
-            # Rasterises the page(s) to pixels and detects column / header /
-            # table regions visually — works regardless of how the PDF was
-            # authored (no dependence on internal text-stream structure).
-            layout_blocks = _run_vlm_layout(doc, format_type)
+        if format_type == 'pdf':
+            if _is_text_pdf(doc.raw_bytes):
+                # ── Path A: Text PDF → Marker ────────────────────────────────
+                # Marker runs layout detection + OCR in a single pass using
+                # Surya. Outputs clean Markdown preserving columns, tables,
+                # headings. No need for a separate layout step.
+                logger.info(
+                    f"{doc.document_id}: text-based PDF detected → Marker pipeline."
+                )
+                return _handle_with_marker(doc)
+            else:
+                # ── Path B: Scanned PDF → DocLayout-YOLO + Chandra ──────────
+                logger.info(
+                    f"{doc.document_id}: scanned PDF detected → YOLO+Chandra pipeline."
+                )
+                return _handle_with_yolo_chandra(doc, 'pdf')
 
-            # ── Free PaliGemma VRAM before Chandra loads ─────────────────────
-            # L4 GPU has 22 GB. PaliGemma (~6 GB) + Chandra (~7 GB) fit, but
-            # fragmentation pushes active usage to ~21 GB causing Chandra OOM.
-            # Unloading PaliGemma weights after layout detection frees ~6 GB
-            # before Chandra needs it, keeping peak usage under ~8 GB.
-            try:
-                from handlers.vlm import unload_model
-                unload_model()
-                logger.info("PaliGemma unloaded from VRAM before Chandra OCR.")
-            except Exception as _oom_e:
-                logger.warning(f"Could not unload PaliGemma ({_oom_e}); continuing.")
-
-            # ── Step 2: Chandra OCR per detected block ───────────────────────
-            # If layout_blocks is None (PaliGemma failed) Chandra falls back
-            # to whole-page OCR automatically via run_ocr.
-            pages = run_ocr(doc, layout_blocks=layout_blocks)
-
-            vlm_guided = layout_blocks is not None
-            extraction_method = "vlm_layout_ocr" if vlm_guided else "chandra_ocr"
-            logger.info(
-                f"handle_binary {doc.document_id}: format={format_type} "
-                f"vlm_guided={vlm_guided} pages={len(pages)}"
-            )
-            return BinaryDocument(
-                document_id=doc.document_id,
-                pages=pages,
-                metadata={
-                    "source_format": doc.detected_format,
-                    "mime_type": doc.mime_type,
-                    "format_type": format_type,
-                    "pages_count": len(pages),
-                    "file_size": len(doc.raw_bytes),
-                    "extraction_method": extraction_method,
-                    "vlm_layout_guided": vlm_guided,
-                },
-            )
+        if format_type == 'image':
+            # ── Path C: Image → DocLayout-YOLO + Chandra ────────────────────
+            return _handle_with_yolo_chandra(doc, 'image')
 
         return _create_empty_binary_doc(doc, f"No handler for format: {format_type}")
 
@@ -93,18 +87,76 @@ def handle_binary(doc: DocumentObject) -> BinaryDocument:
 
 
 # ---------------------------------------------------------------------------
-# VLM layout detection — PaliGemma rasterises + detects blocks, no GPU bypass
+# Path A — Marker (text PDFs)
+# ---------------------------------------------------------------------------
+
+def _handle_with_marker(doc: DocumentObject) -> BinaryDocument:
+    """
+    Convert a text-based PDF with Marker.
+    Falls back to YOLO+Chandra if Marker fails.
+    """
+    try:
+        from handlers.marker_handler import convert_pdf_with_marker
+        return convert_pdf_with_marker(doc)
+    except Exception as exc:
+        logger.warning(
+            f"Marker failed for {doc.document_id} ({exc}); "
+            "falling back to YOLO+Chandra."
+        )
+        return _handle_with_yolo_chandra(doc, 'pdf')
+
+
+# ---------------------------------------------------------------------------
+# Path B/C — DocLayout-YOLO + Chandra (scanned PDFs and images)
+# ---------------------------------------------------------------------------
+
+def _handle_with_yolo_chandra(doc: DocumentObject, format_type: str) -> BinaryDocument:
+    """
+    Layout detection with DocLayout-YOLO then OCR with Chandra.
+
+    YOLO (~0.5 GB) detects block regions visually.
+    Chandra (~7 GB) reads text from each cropped region.
+    Total peak VRAM: ~7.5 GB — well within L4's 22.5 GB.
+    """
+    # Step 1: DocLayout-YOLO visual layout detection
+    layout_blocks = _run_vlm_layout(doc, format_type)
+
+    # Step 2: Chandra OCR per detected block
+    # layout_blocks=None triggers whole-page OCR fallback in run_ocr
+    pages = run_ocr(doc, layout_blocks=layout_blocks)
+
+    vlm_guided        = layout_blocks is not None
+    extraction_method = "yolo_layout_ocr" if vlm_guided else "chandra_ocr"
+    logger.info(
+        f"handle_binary {doc.document_id}: format={format_type} "
+        f"vlm_guided={vlm_guided} pages={len(pages)}"
+    )
+    return BinaryDocument(
+        document_id=doc.document_id,
+        pages=pages,
+        metadata={
+            "source_format":     doc.detected_format,
+            "mime_type":         doc.mime_type,
+            "format_type":       format_type,
+            "pages_count":       len(pages),
+            "file_size":         len(doc.raw_bytes),
+            "extraction_method": extraction_method,
+            "vlm_layout_guided": vlm_guided,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Layout detection helper (DocLayout-YOLO)
 # ---------------------------------------------------------------------------
 
 def _run_vlm_layout(doc: DocumentObject, format_type: str):
     """
-    Run PaliGemma visual layout detection on the document.
+    Run DocLayout-YOLO layout detection on the document.
 
-    PaliGemma rasterises the page(s) to pixel images and detects visually
-    distinct content blocks (columns, headers, tables, figures) by reading
-    the rendered pixels — not the PDF's internal text stream.  This means
-    multi-column PDFs, scanned PDFs, and image documents are all handled
-    identically and correctly.
+    Rasterises PDF pages to pixel images and detects visually distinct
+    content blocks (columns, headers, tables, figures) — works on any PDF
+    regardless of how it was authored.
 
     Returns:
         List[List[LayoutBlock]] for PDFs  (one inner list per page)
@@ -119,20 +171,39 @@ def _run_vlm_layout(doc: DocumentObject, format_type: str):
             return run_layout_detection_on_image(img)
     except Exception as exc:
         logger.warning(
-            f"PaliGemma layout detection failed for {doc.document_id} "
+            f"DocLayout-YOLO layout detection failed for {doc.document_id} "
             f"({exc}); falling back to whole-page Chandra OCR."
         )
         return None
 
 
-def _extract_pdf_with_pymupdf(doc: DocumentObject) -> Optional[BinaryDocument]:
-    """
-    Extract text blocks from a text-based PDF using PyMuPDF (fitz).
+# ---------------------------------------------------------------------------
+# PDF type detection
+# ---------------------------------------------------------------------------
 
-    Uses PaliGemma for visual layout detection (see _run_vlm_layout above).
-    This function is kept for reference only and is no longer called.
+def _is_text_pdf(raw_bytes: bytes) -> bool:
     """
-    pass  # superseded by _run_vlm_layout + run_ocr
+    Return True if the PDF has sufficient embedded text to be processed by
+    Marker (text-based PDF), False if it appears to be scanned.
+
+    Uses PyMuPDF to count total extracted characters across all pages.
+    Scanned pages may have stray OCR artifacts (~10-50 chars); a real text
+    page typically has hundreds.
+    """
+    try:
+        import fitz
+        pdf = fitz.open(stream=raw_bytes, filetype="pdf")
+        total_chars = 0
+        for page in pdf:
+            total_chars += len(page.get_text().strip())
+            if total_chars > _TEXT_PDF_CHAR_THRESHOLD:
+                pdf.close()
+                return True
+        pdf.close()
+        return total_chars > _TEXT_PDF_CHAR_THRESHOLD
+    except Exception:
+        # If we can't open it as a PDF, assume scanned (safe default)
+        return False
 
 
 def _create_empty_binary_doc(doc: DocumentObject, error_message: str) -> BinaryDocument:

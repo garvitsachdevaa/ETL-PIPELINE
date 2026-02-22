@@ -310,7 +310,7 @@ class TestHandleBinaryVlmIntegration:
             result = handle_binary(doc)
 
         assert result.metadata["vlm_layout_guided"] is True
-        assert result.metadata["extraction_method"] == "vlm_layout_ocr"
+        assert result.metadata["extraction_method"] == "yolo_layout_ocr"
 
     def test_metadata_vlm_layout_guided_false_when_vlm_fails(self):
         doc = _make_doc("image/png", "image")

@@ -23,8 +23,14 @@ Pillow
 # ── Chandra OCR (VLM-based, GPU required) ─────────────────────────────────────
 chandra-ocr>=0.1.8
 
-# ── Phase 2 — VLM Layout Detection (PaliGemma 2) ─────────────────────────────
-# bitsandbytes intentionally excluded — not used, CUDA build fails on L4
+# ── Layout detection + text-PDF extraction ───────────────────────────────────
+# DocLayout-YOLO: fast pixel-based layout detection for scanned PDFs / images
+doclayout-yolo
+# Marker: layout + OCR in one pass for text-based PDFs (uses Surya internally)
+marker-pdf
+
+# ── VLM dependencies (PaliGemma kept for VQA only) ───────────────────────────
+# bitsandbytes intentionally excluded — CUDA build fails on L4
 transformers>=4.46.0
 accelerate>=0.30.0
 torch>=2.2.0

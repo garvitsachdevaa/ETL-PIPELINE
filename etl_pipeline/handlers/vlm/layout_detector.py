@@ -14,13 +14,13 @@ import uuid
 from typing import List
 
 from handlers.vlm.block_schema import LayoutBlock
-from handlers.vlm.paligemma_adapter import detect_layout_blocks
+from handlers.vlm.doclayout_yolo_adapter import detect_layout_blocks_yolo
 
 logger = logging.getLogger(__name__)
 
-# DPI used when rasterising PDF pages for VLM input.
-# 150 DPI is a good balance of quality vs. memory for PaliGemma 2 3B (224 px).
-# Increase to 200–300 for PaliGemma 2 10B (448 px).
+# DPI used when rasterising PDF pages for YOLO layout detection.
+# 150 DPI gives ~1240×1754 px for A4 — well within YOLO's 1024 inference size.
+# YOLO internally resizes to 1024 px so higher DPI has diminishing returns.
 RASTERISE_DPI = 150
 
 
@@ -48,7 +48,7 @@ def run_layout_detection_on_image(
     if model_id is not None:
         kwargs["model_id"] = model_id
 
-    raw_blocks = detect_layout_blocks(image, **kwargs)
+    raw_blocks = detect_layout_blocks_yolo(image, **kwargs)
     return _build_layout_blocks(raw_blocks, page_number)
 
 
