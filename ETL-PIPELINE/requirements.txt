@@ -1,0 +1,43 @@
+# Root requirements.txt — read by HuggingFace Spaces at build time.
+
+# ── Core ─────────────────────────────────────────────────────────────────────
+streamlit>=1.50.0
+pandas
+
+# ── Text processing ───────────────────────────────────────────────────────────
+chardet
+beautifulsoup4
+lxml
+
+# ── PDF processing ────────────────────────────────────────────────────────────
+PyPDF2
+PyMuPDF
+
+# ── Document processing ───────────────────────────────────────────────────────
+python-docx==1.2.0
+openpyxl==3.1.5
+
+# ── Image processing ──────────────────────────────────────────────────────────
+Pillow
+
+# ── Chandra OCR (VLM-based, GPU required) ─────────────────────────────────────
+chandra-ocr>=0.1.8
+
+# ── Layout detection + text-PDF extraction ───────────────────────────────────
+# DocLayout-YOLO: fast pixel-based layout detection for scanned PDFs / images
+doclayout-yolo
+# Marker: layout + OCR in one pass for text-based PDFs (uses Surya internally)
+marker-pdf
+
+# ── Chunking & Context (Phase 3) ─────────────────────────────────────────────
+# Semantic chunking via BERTopic + sentence-transformers
+sentence-transformers>=2.7.0
+bertopic>=0.16.0
+
+# ── VLM dependencies (PaliGemma kept for VQA only) ───────────────────────────
+# bitsandbytes intentionally excluded — CUDA build fails on L4
+transformers>=4.46.0
+accelerate>=0.30.0
+torch>=2.2.0
+sentencepiece
+huggingface_hub>=0.23.0

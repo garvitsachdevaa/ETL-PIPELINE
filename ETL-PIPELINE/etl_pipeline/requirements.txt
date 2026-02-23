@@ -1,0 +1,39 @@
+# Core dependencies
+streamlit>=1.50.0
+pandas
+
+# Text processing and detection
+chardet
+beautifulsoup4
+lxml
+
+# PDF processing
+PyPDF2
+PyMuPDF
+
+# Document processing
+python-docx==1.2.0
+openpyxl==3.1.5
+
+# Image processing
+Pillow
+
+# Chandra OCR (VLM-based, GPU required)
+chandra-ocr>=0.1.8
+
+# ── Phase 3 — Chunking & Context ──────────────────────────────────────────────
+# Semantic chunking
+sentence-transformers>=2.7.0
+bertopic>=0.16.0
+
+# ── Phase 2 — VLM Layout Detection (Sprint 1) ──────────────────────────────
+# PaliGemma 2 model loading and inference
+transformers>=4.46.0
+accelerate>=0.30.0
+bitsandbytes>=0.43.0
+torch>=2.2.0
+sentencepiece          # PaliGemma tokenizer
+huggingface_hub>=0.23.0  # HF_TOKEN login for gated models
+
+# PDF rasterisation for VLM input (PyMuPDF already listed above; ensure version)
+# pymupdf is already declared above via PyMuPDF — no duplicate needed
