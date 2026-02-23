@@ -633,8 +633,8 @@ def show_chunking_tab(result):
     # Description beneath the selector
     st.caption(f"ℹ️ {METHOD_INFO[method][1]}")
 
-    # ── Context-mode granularity controls ──────────────────────────────────
-    granularity = "Auto"  # default for non-context modes
+    # ── Context-mode grouping controls ──────────────────────────────────
+    nr_topics_input: int | None = None  # default for non-context modes
     if method == "context":
         st.info(
             "**BERTopic mode** will:\n"
@@ -645,31 +645,35 @@ def show_chunking_tab(result):
             "Requires ≥5 paragraphs — short documents fall back to paragraph mode."
         )
 
-        st.markdown("**Context Granularity**")
-        granularity = st.select_slider(
-            "How finely should topics be split?",
-            options=["Very Broad", "Broad", "Auto", "Fine", "Very Fine"],
-            value="Auto",
-            help=(
-                "BERTopic is always fitted at maximum granularity, then "
-                "reduce_topics() merges down to a target count based on "
-                "document size × fraction:\n"
-                "Very Broad 15% · Broad 25% · Auto (no reduction) · Fine 40% · Very Fine 60%"
-            ),
-        )
-        grain_desc = {
-            "Very Broad": ("🔵", "~15% of paragraphs as groups — fewest, broadest chunks. "
-                                  "e.g. 12 para → **2 groups**"),
-            "Broad":      ("🟦", "~25% of paragraphs as groups. "
-                                  "e.g. 12 para → **3 groups**"),
-            "Auto":       ("⚪", "BERTopic decides — no forced reduction. Recommended for most documents."),
-            "Fine":       ("🟧", "~40% of paragraphs as groups. "
-                                  "e.g. 12 para → **4 groups**"),
-            "Very Fine":  ("🔴", "~60% of paragraphs as groups — most separation. "
-                                  "e.g. 12 para → **7 groups**"),
-        }
-        icon, desc = grain_desc[granularity]
-        st.caption(f"{icon} {desc}")
+        st.markdown("**Number of Context Groups**")
+        col_mode, col_input = st.columns([1, 1])
+        with col_mode:
+            grouping_mode = st.radio(
+                "Mode",
+                options=["Auto", "Manual"],
+                horizontal=True,
+                label_visibility="collapsed",
+                help="Auto: BERTopic finds the natural number of topics. Manual: you decide.",
+            )
+        with col_input:
+            if grouping_mode == "Manual":
+                nr_topics_input = st.number_input(
+                    "Number of groups",
+                    min_value=2,
+                    max_value=50,
+                    value=4,
+                    step=1,
+                    help=(
+                        "How many context groups to create. "
+                        "BERTopic first finds all natural topics, then merges "
+                        "down to this number. If you ask for more than naturally "
+                        "exist, the natural count is kept."
+                    ),
+                )
+            else:
+                st.caption(
+                    "🤖 BERTopic will find the optimal number of natural topic groups automatically."
+                )
 
     st.markdown("---")
 
@@ -678,7 +682,7 @@ def show_chunking_tab(result):
         try:
             from chunking import Chunker
             with st.spinner(f"Chunking document ({METHOD_INFO[method][0]})…"):
-                chunk_result = Chunker.chunk(result, method=method, granularity=granularity)
+                chunk_result = Chunker.chunk(result, method=method, nr_topics=nr_topics_input)
 
             st.success(
                 f"✅ **{chunk_result.total_chunks}** chunk(s) produced "

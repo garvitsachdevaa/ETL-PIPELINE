@@ -161,41 +161,19 @@ def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 _MIN_CHUNKS_FOR_BERTOPIC = 5   # BERTopic needs a reasonable corpus
-
-
-def _target_nr_topics(num_paragraphs: int, granularity: str) -> int | str:
-    """
-    Map granularity + corpus size → desired number of topic groups.
-
-    BERTopic is always fitted at maximum granularity (min_topic_size=2),
-    then reduce_topics() merges down to this target.  This is the only
-    reliable control lever: UMAP flattens the embedding space before
-    HDBSCAN runs, making cluster_selection_epsilon essentially useless.
-
-    Fractions of num_paragraphs (floored, min 2):
-        Very Fine  → 60%  e.g. 12 para → 7 groups
-        Fine       → 40%  e.g. 12 para → 4 groups
-        Auto       → BERTopic decides (no reduction)
-        Broad      → 25%  e.g. 12 para → 3 groups
-        Very Broad → 15%  e.g. 12 para → 2 groups
-    """
-    if granularity == "Auto":
-        return "auto"
-    fracs = {
-        "Very Fine":  0.60,
-        "Fine":       0.40,
-        "Broad":      0.25,
-        "Very Broad": 0.15,
-    }
-    frac = fracs.get(granularity, 0.40)
-    return max(2, int(num_paragraphs * frac))
+_BERTOPIC_RANDOM_SEED = 42     # fixed seed — same file always gets same clusters
 
 
 def chunk_by_context(
     segments: List[Segment],
     embedding_model_name: str = "all-MiniLM-L6-v2",
-    granularity: str = "Auto",
+    nr_topics: int | None = None,
 ) -> Tuple[List[Chunk], List[ContextGroup]]:
+    """
+    nr_topics=None  → Auto: BERTopic decides the natural number of topics.
+    nr_topics=N     → Manual: BERTopic finds all topics first, then merges
+                     down to exactly N (or the natural max if N > natural max).
+    """
     """
     Semantic context chunking — Scenario C (individual + merged).
 
@@ -278,24 +256,26 @@ def chunk_by_context(
     st_model = SentenceTransformer(embedding_model_name)
     embeddings = np.array(st_model.encode(texts, show_progress_bar=False))
 
-    # ── Step 3: BERTopic — always fit at max granularity, then reduce ─────────
-    nr_topics_target = _target_nr_topics(len(base_chunks), granularity)
-    logger.info(
-        "chunk_by_context: granularity='%s' → target nr_topics=%s on %d paragraphs",
-        granularity, nr_topics_target, len(texts),
-    )
+    # ── Step 3: BERTopic — always fit at max granularity, then reduce if needed ─
     from sklearn.feature_extraction.text import CountVectorizer
+    from umap import UMAP
 
+    n_neighbors = min(5, len(texts) - 1)
+    umap_model = UMAP(
+        n_neighbors=n_neighbors,
+        n_components=min(5, len(texts) - 2),
+        min_dist=0.0,
+        metric="cosine",
+        random_state=_BERTOPIC_RANDOM_SEED,  # same file → same clusters every run
+    )
     vectorizer = CountVectorizer(
         stop_words="english",
         min_df=1,
         ngram_range=(1, 2),
     )
-    # Always fit at max granularity (min_topic_size=2) — reduce_topics() handles
-    # merging afterward.  This gives BERTopic the best chance to find all real
-    # topics first, then we collapse them to the desired count.
     topic_model = BERTopic(
         embedding_model=st_model,
+        umap_model=umap_model,
         vectorizer_model=vectorizer,
         min_topic_size=2,
         nr_topics="auto",
@@ -304,19 +284,28 @@ def chunk_by_context(
     )
     topics, _ = topic_model.fit_transform(texts, embeddings)
 
-    # Reduce if the user asked for fewer topics than BERTopic produced
+    # Natural topics BERTopic found (excluding outlier -1)
     unique_real_topics = [t for t in set(topics) if t != -1]
-    if nr_topics_target != "auto" and len(unique_real_topics) > nr_topics_target:
-        logger.info(
-            "chunk_by_context: reducing %d topics → %d via reduce_topics()",
-            len(unique_real_topics), nr_topics_target,
-        )
-        topics, _ = topic_model.reduce_topics(texts, nr_topics=nr_topics_target)
-    elif nr_topics_target != "auto" and len(unique_real_topics) <= nr_topics_target:
-        logger.info(
-            "chunk_by_context: already at %d topics ≤ target %d, no reduction needed",
-            len(unique_real_topics), nr_topics_target,
-        )
+    natural_count = len(unique_real_topics)
+    logger.info(
+        "chunk_by_context: BERTopic found %d natural topic(s); nr_topics request=%s",
+        natural_count, nr_topics,
+    )
+
+    # Manual mode: reduce if user asked for fewer than natural count
+    if nr_topics is not None:
+        target = max(2, min(nr_topics, natural_count))  # clamp: 2 ≤ target ≤ natural
+        if target < natural_count:
+            logger.info(
+                "chunk_by_context: reducing %d → %d topics via reduce_topics()",
+                natural_count, target,
+            )
+            topics, _ = topic_model.reduce_topics(texts, nr_topics=target)
+        else:
+            logger.info(
+                "chunk_by_context: requested %d ≥ natural %d — keeping all topics",
+                nr_topics, natural_count,
+            )
 
     # ── Step 4: compute topic centroids + cosine similarity ─────────────────
     # Group embedding indices by topic

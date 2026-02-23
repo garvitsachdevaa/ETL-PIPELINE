@@ -52,7 +52,7 @@ class Chunker:
         cls,
         document: Any,
         method: ChunkMethod = "paragraph",
-        granularity: str = "Auto",
+        nr_topics: int | None = None,
     ) -> ChunkingResult:
         """
         Chunk a processed document.
@@ -63,9 +63,10 @@ class Chunker:
             The result object produced by text_handler or binary_handler.
         method : 'line' | 'paragraph' | 'section' | 'context'
             Chunking strategy to apply.
-        granularity : 'Very Broad' | 'Broad' | 'Auto' | 'Fine' | 'Very Fine'
-            Context-mode only. Controls how aggressively topics are split:
-            Very Broad → fewest groups; Very Fine → most groups.
+        nr_topics : int | None
+            Context-mode only.
+            None  → Auto: BERTopic decides the natural number of topics.
+            int N → Manual: merge down to N groups (clamped to natural max).
 
         Returns
         -------
@@ -92,7 +93,7 @@ class Chunker:
             chunks = chunk_by_section(segments)
 
         elif method == "context":
-            chunks, context_groups = chunk_by_context(segments, granularity=granularity)
+            chunks, context_groups = chunk_by_context(segments, nr_topics=nr_topics)
 
         else:
             raise ValueError(
