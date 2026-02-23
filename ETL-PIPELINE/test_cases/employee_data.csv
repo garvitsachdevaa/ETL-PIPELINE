@@ -1,0 +1,11 @@
+Employee_ID,Name,Department,Hire_Date,Salary,Performance_Score
+1001,Alice Johnson,Engineering,2022-03-15,75000,4.2
+1002,Bob Smith,Marketing,2021-07-22,62000,3.8
+1003,Carol Davis,Engineering,2023-01-10,78000,4.5
+1004,David Wilson,Sales,2020-11-05,55000,3.9
+1005,Emma Brown,HR,2022-09-18,58000,4.1
+1006,Frank Miller,Engineering,2023-04-03,82000,4.7
+1007,Grace Lee,Marketing,2021-12-14,65000,4.0
+1008,Henry Chen,Sales,2022-06-28,59000,3.7
+1009,"Sarah O'Connor",Engineering,2023-02-20,76000,4.3
+1010,Michael Zhang,IT,2022-11-30,72000,4.4

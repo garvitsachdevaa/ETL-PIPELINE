@@ -1,0 +1,59 @@
+Champions League Semi-Final: Real Madrid vs Bayern Munich
+
+Real Madrid defeated Bayern Munich 3-1 in the first leg of the Champions League semi-final at the Santiago Bernabeu on Tuesday night. Vinicius Junior was instrumental throughout the match, scoring two goals and assisting the third from a pinpoint through-ball to Bellingham. Bayern's sole consolation came from a powerful header by Harry Kane in the 73rd minute.
+
+NBA Playoffs: Denver Nuggets Advance to Conference Finals
+
+The Denver Nuggets eliminated the Los Angeles Lakers in five games, with Nikola Jokic posting yet another triple-double in the decisive game. Jokic finished with 31 points, 14 rebounds, and 11 assists, demonstrating why he remains the most complete player in the league. Denver will face the Oklahoma City Thunder in the Western Conference Finals starting Friday.
+
+Real Madrid Injury Update Ahead of Second Leg
+
+Real Madrid manager Carlo Ancelotti confirmed that Toni Kroos suffered a minor hamstring strain during the Bayern match and is a doubt for the second leg in Munich next week. Eduardo Camavinga is expected to step into the midfield pivot role should Kroos fail his fitness test on Saturday. The Spanish giants remain confident of progressing to the final despite the setback.
+
+Wimbledon Seedings Announced for 2025 Edition
+
+The All England Club released the official Wimbledon seedings with Carlos Alcaraz leading the men's draw as top seed, followed by Jannik Sinner and Novak Djokovic. Coco Gauff heads the women's draw as first seed, while Aryna Sabalenka and Iga Swiatek round out the top three. Play begins on the last Monday of June on the famous grass courts in southwest London.
+
+US Congress Passes Infrastructure Modernisation Act
+
+The United States Congress passed a landmark $800 billion Infrastructure Modernisation Act on Wednesday after months of bipartisan negotiations. The bill allocates $320 billion to road and bridge repairs, $180 billion to railway expansion and high-speed rail, and $130 billion to broadband internet in rural communities. President Johnson is expected to sign the legislation at a White House ceremony on Friday.
+
+European Parliament Debates AI Regulation Framework
+
+The European Parliament held a heated debate over the proposed Artificial Intelligence Regulation Framework, with member states divided over the definition of high-risk AI systems. Critics argue that overly broad categorisation of high-risk systems will stifle innovation among European startups and disadvantage the EU relative to American and Chinese competitors. A revised draft is expected to be submitted to committee by the end of the month.
+
+UK Prime Minister Announces Snap General Election
+
+British Prime Minister announced a snap general election for the 15th of next month, citing the need for a public mandate on economic reform. The announcement surprised Westminster insiders, who had expected the election to be held in autumn. Polling currently shows a tight race between the governing party and the main opposition, with smaller parties potentially holding the balance of power.
+
+French Government Faces No-Confidence Vote
+
+The French government survived a no-confidence motion in the National Assembly by a slim margin of only eight votes on Thursday. The motion was triggered by opposition to the government's pension reform bill, which raises the retirement age from 62 to 64. Prime Minister Dupont vowed to press ahead with the reform, calling it essential for the long-term fiscal sustainability of the French social security system.
+
+OpenAI Releases GPT-5 Multimodal API
+
+OpenAI launched the public API for GPT-5 Multimodal, enabling developers to build applications that seamlessly process text, images, audio, and video in a single model call. Early benchmarks suggest significant improvements over GPT-4o in complex reasoning tasks, coding assistance, and multilingual performance. The API is available on a tiered pricing model with rate limits that scale with subscription level.
+
+Google DeepMind Achieves New Protein Folding Milestone
+
+Google DeepMind announced that its AlphaFold 3 system has successfully predicted the structure of all known human proteins with greater accuracy than any previous method, including earlier AlphaFold versions. The breakthrough has significant implications for drug discovery, with researchers reporting that two novel drug candidates identified using the tool have already entered preclinical trials. The full model weights will be made available to academic researchers in June.
+
+Quantum Computing Startup Raises $650 Million Series C
+
+QuantumLeap, a San Francisco-based quantum computing startup, closed a $650 million Series C funding round led by Andreessen Horowitz and SoftBank. The company claims its 1,200-qubit processor achieved quantum advantage over classical supercomputers on a specific optimisation benchmark for the first time. If validated independently, this would represent a historic milestone in the race toward practical quantum computing.
+
+Arctic Ice Sheet Records Lowest Winter Extent Since Measurements Began
+
+Scientists at the National Snow and Ice Data Centre reported that Arctic sea ice reached its lowest winter maximum extent since satellite monitoring began in 1979, covering just 14.2 million square kilometres in March. The record low follows three consecutive years of below-average ice formation and is consistent with accelerating warming trends in the polar region. Researchers warned that a seasonally ice-free Arctic could arrive decades earlier than previously projected under current emissions trajectories.
+
+Coral Bleaching Event Declared Across Great Barrier Reef
+
+Australian marine authorities declared a mass bleaching event across 82% of the Great Barrier Reef survey sites for the fourth time in nine years, following an extended marine heatwave in the Coral Sea. Water temperatures in the affected zones exceeded the bleaching threshold by up to 4 degrees Celsius for more than six consecutive weeks. Conservationists called for faster cuts to greenhouse gas emissions, warning that the reef faces functional collapse if average sea surface temperatures rise a further 0.5 degrees Celsius above current levels.
+
+UN Climate Summit Agrees on $300 Billion Loss and Damage Fund
+
+Delegates at the UN Climate Summit in Nairobi agreed to establish a $300 billion annual Loss and Damage Fund by 2030 to assist developing nations disproportionately affected by climate-related disasters. Developed nations committed to providing the majority of funding in the form of grants rather than loans, addressing a key sticking point from previous negotiations. Climate activists welcomed the agreement while noting it still falls short of the $400 billion annual estimate of climate-related losses in vulnerable nations.
+
+Heatwave Kills Hundreds Across South Asia
+
+A record-breaking heatwave swept across Pakistan, India, and Bangladesh in April, with temperatures exceeding 48 degrees Celsius in multiple cities for more than ten consecutive days. Official figures recorded at least 640 heat-related deaths across the three countries, though health officials warned actual mortality was likely significantly higher. Hospitals in Karachi, Lahore, and Dhaka reported being overwhelmed with patients presenting symptoms of heat stroke, dehydration, and cardiac events triggered by the extreme conditions.

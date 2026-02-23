@@ -1,0 +1,55 @@
+Patient Symptoms and Chief Complaint
+
+The patient, a 54-year-old male, presented to the emergency department with a chief complaint of chest pain radiating to the left arm. He reported the pain had started approximately three hours prior to arrival and described it as a crushing, pressure-like sensation rated 8 out of 10 in severity.
+
+Shortness of Breath and Respiratory Findings
+
+The patient also complained of significant shortness of breath, which worsened when lying flat. He reported difficulty breathing during minimal exertion over the past two weeks. On auscultation, bilateral basal crackles were noted, suggesting pulmonary congestion.
+
+Fatigue and Physical Examination
+
+He reported persistent fatigue lasting several weeks, along with mild swelling in both ankles. Physical examination revealed elevated jugular venous pressure and mild bilateral pitting edema up to mid-shin. His blood pressure was 158/96 mmHg and heart rate was 102 bpm.
+
+Nausea and Gastrointestinal Symptoms
+
+The patient reported intermittent nausea and one episode of vomiting prior to hospital arrival. He denied any abdominal pain or changes in bowel habits. His appetite had been poor for the past ten days, consistent with his overall decline in functional status.
+
+Diagnosis: Acute Heart Failure Exacerbation
+
+Based on clinical examination, ECG findings, and elevated BNP levels of 1850 pg/mL, the admitting cardiologist diagnosed the patient with acute decompensated heart failure. The ejection fraction on bedside echocardiogram was reduced at 32%, confirming significant systolic dysfunction.
+
+Diagnosis: Hypertensive Heart Disease
+
+The patient has a ten-year history of poorly controlled hypertension, which is the primary etiology of his cardiomyopathy. His previous echocardiogram from eighteen months ago already showed an ejection fraction of 40%, indicating progressive deterioration. Left ventricular hypertrophy was evident on ECG.
+
+Diagnosis: Secondary Renal Dysfunction
+
+Laboratory results revealed creatinine of 2.1 mg/dL, up from a baseline of 1.4 mg/dL six months prior. This acute-on-chronic kidney injury is consistent with cardiorenal syndrome, where reduced cardiac output directly impairs renal perfusion. Urine output was monitored closely throughout admission.
+
+Medication: Intravenous Furosemide
+
+The patient was started on intravenous furosemide 80 mg twice daily to achieve diuresis and relieve fluid overload. Fluid balance was closely monitored, targeting a net negative balance of 1 to 1.5 litres per day. Electrolytes were checked every eight hours to prevent hypokalemia.
+
+Medication: ACE Inhibitor and Beta Blocker
+
+Ramipril 5 mg once daily was initiated for afterload reduction and cardiac remodeling benefit. A low-dose beta blocker, carvedilol 3.125 mg twice daily, was commenced once the patient was no longer acutely decompensated. Both medications are evidence-based cornerstones of heart failure management with reduced ejection fraction.
+
+Medication: Spironolactone for Neurohormonal Blockade
+
+Spironolactone 25 mg once daily was added as a mineralocorticoid receptor antagonist to reduce mortality and hospitalisation risk. The patient was counselled regarding monitoring of potassium levels given concurrent ACE inhibitor use. Renal function and electrolytes were to be reviewed at two-week follow-up.
+
+Follow-Up: Cardiology Outpatient Review
+
+The patient was discharged after five days with clear instructions to follow up in the heart failure clinic within two weeks. His discharge medications included furosemide, ramipril, carvedilol, and spironolactone. He was advised to weigh himself daily and return to the emergency department if his weight increased by more than 2 kg in two days.
+
+Follow-Up: Dietary and Lifestyle Advice
+
+The patient was educated on a low-sodium diet, with a strict limit of 2 grams of sodium per day to reduce fluid retention. He was advised to restrict fluid intake to 1.5 litres daily. A cardiac rehabilitation referral was placed to support gradual return to physical activity and ongoing education.
+
+Follow-Up: Renal Function Monitoring
+
+Given the episode of acute kidney injury, a repeat metabolic panel was arranged for one week post-discharge. The nephrology team was consulted and recommended continued observation without renal replacement therapy at this time. If creatinine continued to rise, nephrology review would be expedited.
+
+Follow-Up: Device Therapy Consideration
+
+The cardiologist discussed with the patient the possibility of implantable cardioverter defibrillator placement if his ejection fraction remained below 35% after three months of optimal medical therapy. The patient was also referred for cardiac resynchronisation therapy evaluation given a QRS duration of 140 ms on ECG. These decisions would be revisited at the six-week clinic visit.

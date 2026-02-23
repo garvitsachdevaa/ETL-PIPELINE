@@ -1,0 +1,65 @@
+MIXED_CONTENT_TEST_DOCUMENT
+
+This document contains mixed content types to test the ETL pipeline's 
+format detection and routing capabilities.
+
+--- JSON EMBEDDED CONTENT ---
+{
+  "embedded_json": {
+    "type": "test_data",
+    "processing_note": "This JSON should be detected within the text content",
+    "test_values": [1, 2, 3, 4, 5],
+    "nested_object": {
+      "key1": "value1",
+      "key2": "value2"
+    }
+  }
+}
+
+--- XML EMBEDDED CONTENT ---
+<?xml version="1.0"?>
+<embedded_xml>
+    <test_element attribute="value">
+        This XML content is embedded within the text document
+        and should be processed according to the mixed content handler.
+    </test_element>
+    <data_list>
+        <item>First item</item>
+        <item>Second item</item>
+        <item>Third item</item>
+    </data_list>
+</embedded_xml>
+
+--- HTML EMBEDDED CONTENT ---
+<html>
+<head><title>Embedded HTML</title></head>
+<body>
+    <h1>HTML Section</h1>
+    <p>This HTML content is <strong>embedded</strong> within the text.</p>
+    <ul>
+        <li>HTML list item 1</li>
+        <li>HTML list item 2</li>
+    </ul>
+</body>
+</html>
+
+--- CSV EMBEDDED CONTENT ---
+Name,Age,Department,Salary
+Alice,28,Engineering,75000
+Bob,32,Marketing,68000
+Carol,25,Design,62000
+
+--- PLAIN TEXT CONTINUATION ---
+After the embedded content sections, this document continues with 
+regular plain text. The mixed content handler should properly 
+identify and route each content type to the appropriate processor.
+
+Processing Validation:
+- Detect embedded JSON and route to JSON parser
+- Identify XML content and handle namespaces
+- Process HTML with tag removal and structure preservation  
+- Parse CSV data into structured format
+- Handle plain text sections normally
+
+Expected Result: Multiple processed sections with different format
+types and appropriate metadata for each content type detected.

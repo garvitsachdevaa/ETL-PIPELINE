@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<etl_test_document xmlns="http://etl.pipeline.test/v1" xmlns:meta="http://etl.pipeline.test/metadata">
+    <document_info>
+        <meta:title>ETL Pipeline XML Test Document</meta:title>
+        <meta:version>1.0</meta:version>
+        <meta:created_date>2026-02-03</meta:created_date>
+        <meta:purpose>Testing XML content extraction and namespace handling</meta:purpose>
+    </document_info>
+
+    <content>
+        <section id="introduction">
+            <heading level="1">XML Processing Test</heading>
+            <paragraph>
+                This XML document tests the ETL pipeline's ability to process structured XML content
+                with multiple namespaces, nested elements, and various data types.
+            </paragraph>
+        </section>
+
+        <section id="features">
+            <heading level="2">Processing Features</heading>
+            <features_list>
+                <feature priority="high">XML namespace handling</feature>
+                <feature priority="high">Nested element extraction</feature>
+                <feature priority="medium">Attribute processing</feature>
+                <feature priority="medium">CDATA section handling</feature>
+                <feature priority="low">DTD and schema validation</feature>
+            </features_list>
+        </section>
+
+        <section id="test_data">
+            <heading level="2">Test Data Sets</heading>
+            <data_collection>
+                <data_set type="employee">
+                    <record id="emp001">
+                        <name>John Doe</name>
+                        <department>Engineering</department>
+                        <salary currency="USD">75000</salary>
+                        <hire_date format="YYYY-MM-DD">2023-01-15</hire_date>
+                    </record>
+                    <record id="emp002">
+                        <name>Jane Smith</name>
+                        <department>Marketing</department>
+                        <salary currency="USD">68000</salary>
+                        <hire_date format="YYYY-MM-DD">2022-08-20</hire_date>
+                    </record>
+                </data_set>
+
+                <data_set type="project">
+                    <project status="active">
+                        <name>ETL Pipeline Enhancement</name>
+                        <description>
+                            <![CDATA[
+                            Comprehensive enhancement of the ETL pipeline system including:
+                            - Binary format support (XLSX, DOCX, PDF)
+                            - Mixed content processing
+                            - Performance optimization
+                            - Error handling improvements
+                            ]]>
+                        </description>
+                        <team_members>
+                            <member role="lead">Alice Johnson</member>
+                            <member role="developer">Bob Wilson</member>
+                            <member role="tester">Carol Davis</member>
+                        </team_members>
+                    </project>
+                </data_set>
+            </data_collection>
+        </section>
+
+        <section id="configuration">
+            <heading level="2">Processing Configuration</heading>
+            <config>
+                <processing_options>
+                    <preserve_structure>true</preserve_structure>
+                    <extract_attributes>true</extract_attributes>
+                    <handle_namespaces>true</handle_namespaces>
+                    <validate_schema>false</validate_schema>
+                </processing_options>
+                <output_format>
+                    <sections>multiple</sections>
+                    <metadata>rich</metadata>
+                    <confidence_scoring>enabled</confidence_scoring>
+                </output_format>
+            </config>
+        </section>
+    </content>
+
+    <meta:processing_notes>
+        This XML document should be processed into multiple structured sections,
+        preserving the hierarchical organization and extracting both element
+        content and attribute information.
+    </meta:processing_notes>
+</etl_test_document>
