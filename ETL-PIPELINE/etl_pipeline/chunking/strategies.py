@@ -261,9 +261,10 @@ def chunk_by_context(
     from umap import UMAP
 
     n_neighbors = min(5, len(texts) - 1)
+    n_components = max(2, min(5, len(texts) - 2))  # must be ≥ 2 and < n_samples
     umap_model = UMAP(
         n_neighbors=n_neighbors,
-        n_components=min(5, len(texts) - 2),
+        n_components=n_components,
         min_dist=0.0,
         metric="cosine",
         random_state=_BERTOPIC_RANDOM_SEED,  # same file → same clusters every run
@@ -300,7 +301,10 @@ def chunk_by_context(
                 "chunk_by_context: reducing %d → %d topics via reduce_topics()",
                 natural_count, target,
             )
-            topics, _ = topic_model.reduce_topics(texts, nr_topics=target)
+            # reduce_topics() modifies the model in-place and returns self (BERTopic ≥0.16)
+            # Updated topic assignments live in topic_model.topics_ afterward
+            topic_model.reduce_topics(texts, nr_topics=target)
+            topics = topic_model.topics_
         else:
             logger.info(
                 "chunk_by_context: requested %d ≥ natural %d — keeping all topics",
