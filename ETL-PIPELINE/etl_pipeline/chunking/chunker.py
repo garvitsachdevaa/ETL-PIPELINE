@@ -95,9 +95,11 @@ class Chunker:
             chunks = chunk_by_paragraph(cls._as_full_text_segments(document, segments))
 
         elif method == "section":
-            # Section mode intentionally uses the parser-derived structural
-            # segments (headings, chapters) — keep as-is.
-            chunks = chunk_by_section(segments)
+            # Section mode needs the full rejoined text so the header-detection
+            # regex can see the document structure.  For documents where the
+            # parser has already identified structural sections (docx, pdf with
+            # headings) the rejoined text preserves those boundaries.
+            chunks = chunk_by_section(cls._as_full_text_segments(document, segments))
 
         elif method == "context":
             chunks, context_groups = chunk_by_context(segments, nr_topics=nr_topics)

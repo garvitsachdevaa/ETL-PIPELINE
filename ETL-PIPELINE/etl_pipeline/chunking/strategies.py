@@ -34,26 +34,35 @@ logger = logging.getLogger(__name__)
 Segment = Tuple[str, Dict[str, Any]]
 
 
+# Sentence boundary: after . ! ? followed by whitespace or end of string
+_SENTENCE_END = re.compile(r'(?<=[.!?])(?:\s+|$)')
+
+
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. LINE CHUNKING
+# 1. LINE CHUNKING  (sentence-level — finest granularity)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def chunk_by_line(segments: List[Segment]) -> List[Chunk]:
     """
-    Split every segment on newline boundaries.
-    Each non-empty line becomes one Chunk.
+    Split every segment into individual sentences.
+    Uses punctuation-based sentence detection (. ! ?) so that even
+    single-line paragraphs are broken into multiple chunks, giving
+    meaningfully finer granularity than paragraph mode.
     """
     chunks: List[Chunk] = []
     idx = 0
 
     for text, meta in segments:
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
+        # Normalise whitespace first
+        text = text.replace('\r\n', '\n').replace('\r', '\n').strip()
+        sentences = _SENTENCE_END.split(text)
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
                 continue
             chunks.append(Chunk(
                 chunk_id=str(uuid.uuid4()),
-                text=line,
+                text=sent,
                 method="line",
                 chunk_index=idx,
                 metadata={**meta},
@@ -96,29 +105,31 @@ def chunk_by_paragraph(segments: List[Segment]) -> List[Chunk]:
 # 3. SECTION CHUNKING
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Patterns that indicate a new section boundary
+# A line that looks like a structural heading.
+# Must occupy a full line on its own (no trailing prose on the same line
+# that would make it look like a normal sentence).
 _SECTION_PATTERN = re.compile(
     r"(?m)^(?:"
-    r"\d+[\.\)]\s+\S"          # "1. Intro" or "2) Methods"
-    r"|#{1,4}\s+\S"             # Markdown headings  ## Title
-    r"|[A-Z][A-Z\s]{3,}$"      # ALL-CAPS lines
-    r"|(?:Chapter|Section|Part|Appendix)\s+\S"  # Explicit section keywords
-    r"|={3,}|-{3,}|_{3,}"      # Horizontal rules
-    r")"
+    r"#{1,6}\s+\S.*"                               # ## Markdown heading
+    r"|\d+[.)]\s+[A-Z]\S*.*"                       # 1. Title  /  2) Title
+    r"|(?:Chapter|Section|Part|Appendix)\s+\S.*"   # Chapter One / Section 2
+    r"|[A-Z][A-Z ]{3,60}$"                         # ALL CAPS TITLE LINE
+    r")$"
 )
 
 
 def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
     """
-    Split every segment at detected structural headers / dividers.
-    Each section (header + body) becomes one Chunk.
-    Falls back to paragraph splitting if no structural markers are found.
+    Split every segment at detected structural headers (## Markdown,
+    numbered headings, ALL-CAPS titles, Chapter/Section keywords).
+    Each section (header line + body) becomes one Chunk.
+    Falls back to paragraph splitting when no structural markers are found.
     """
     chunks: List[Chunk] = []
     idx = 0
 
     for text, meta in segments:
-        # Find all header positions
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
         boundaries = [m.start() for m in _SECTION_PATTERN.finditer(text)]
 
         if not boundaries:
@@ -136,8 +147,18 @@ def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
                     idx += 1
             continue
 
-        # Include text before the first boundary as a preamble section
-        boundaries = [0] + boundaries
+        # Capture any preamble text that appears before the first header
+        if boundaries[0] > 0:
+            preamble = text[:boundaries[0]].strip()
+            if preamble:
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4()),
+                    text=preamble,
+                    method="section",
+                    chunk_index=idx,
+                    metadata={**meta, "section_detected": False, "section_number": 0},
+                ))
+                idx += 1
 
         for i, start in enumerate(boundaries):
             end = boundaries[i + 1] if i + 1 < len(boundaries) else len(text)
@@ -149,7 +170,7 @@ def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
                 text=section_text,
                 method="section",
                 chunk_index=idx,
-                metadata={**meta, "section_detected": True, "section_number": i},
+                metadata={**meta, "section_detected": True, "section_number": i + 1},
             ))
             idx += 1
 

@@ -1,0 +1,21 @@
+## Introduction
+
+John is a doctor who works in London. He specialises in oncology. He has been practising for 20 years. His research focuses on early cancer detection.
+
+Climate change is accelerating globally. Temperatures have risen by 1.5 degrees Celsius. Farmers across the world are struggling to adapt. Crop yields are expected to fall by 25 percent.
+
+## Methodology
+
+The study used machine learning models trained on patient data. Data was collected from 500 hospitals across 12 countries. Results were independently validated by three expert panels. The whole process took 18 months.
+
+Statistical analysis was performed using Python and R. Cross-validation was applied to avoid overfitting. Confidence intervals were reported at the 95 percent level.
+
+## Results
+
+Accuracy improved by 34 percent over the baseline model. False positives dropped from 18 percent to 6 percent. Patient outcomes improved measurably in all trial groups. The model generalised well to unseen hospital data.
+
+Cost savings per hospital averaged 1.2 million dollars annually. Staff workload reduced by roughly 40 percent. Patient waiting times fell by an average of 3 days.
+
+## Conclusion
+
+Both AI and climate research require sustained long-term funding. Collaboration between technology and healthcare sectors is essential. Regulatory frameworks must keep pace with innovation. Future work will focus on real-world deployment at scale.
