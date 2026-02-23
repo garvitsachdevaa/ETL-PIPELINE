@@ -81,15 +81,22 @@ class Chunker:
             return ChunkingResult(method=method, total_chunks=0)
 
         # ── Dispatch ────────────────────────────────────────────────────────
+        # Line and paragraph modes need the FULL raw text as one segment so
+        # they can apply their own splitting.  The plain-text parser already
+        # splits by blank line into individual sections, which would make all
+        # three simple modes produce identical output if we passed pre-split
+        # segments directly.
         context_groups: List[ContextGroup] = []
 
         if method == "line":
-            chunks = chunk_by_line(segments)
+            chunks = chunk_by_line(cls._as_full_text_segments(document, segments))
 
         elif method == "paragraph":
-            chunks = chunk_by_paragraph(segments)
+            chunks = chunk_by_paragraph(cls._as_full_text_segments(document, segments))
 
         elif method == "section":
+            # Section mode intentionally uses the parser-derived structural
+            # segments (headings, chapters) — keep as-is.
             chunks = chunk_by_section(segments)
 
         elif method == "context":
@@ -113,7 +120,34 @@ class Chunker:
             context_groups=context_groups,
         )
 
-    # ── Internal helpers ────────────────────────────────────────────────────
+    @staticmethod
+    def _as_full_text_segments(
+        document: Any, segments: List[Segment]
+    ) -> List[Segment]:
+        """
+        For line / paragraph chunking we need the complete raw text as ONE
+        segment so the strategy can do its own splitting.
+
+        For TextDocuments the parser has already split by blank lines, so we
+        rejoin all section texts with double-newlines to restore the original
+        structure.  For BinaryDocuments (page blocks) we keep the existing
+        per-block segments unchanged — each block is already a natural unit.
+        """
+        # BinaryDocument — keep per-block granularity
+        if hasattr(document, "pages"):
+            return segments
+
+        # TextDocument — join all section content back into full document text
+        if hasattr(document, "sections"):
+            full_text = "\n\n".join(text for text, _ in segments)
+            if not full_text.strip():
+                return segments
+            # Use metadata from the first segment as representative provenance
+            base_meta = {**segments[0][1]} if segments else {"source": "text"}
+            return [(full_text, base_meta)]
+
+        # Raw-text fallback — already a single segment
+        return segments
 
     @classmethod
     def _extract_segments(cls, document: Any) -> List[Segment]:
