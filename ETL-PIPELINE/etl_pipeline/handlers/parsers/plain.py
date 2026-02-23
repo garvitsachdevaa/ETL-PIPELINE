@@ -218,19 +218,20 @@ def _parse_paragraphs(text: str) -> List[TextSection]:
     sections = []
     
     for para in paragraphs:
-        if len(para) > 10:  # Skip very short paragraphs
-            sections.append(
-                TextSection(
-                    section_id=str(uuid.uuid4()),
-                    format_type="text",
-                    content=para,
-                    metadata={
-                        "section_type": "paragraph",
-                        "word_count": len(para.split()),
-                        "char_count": len(para)
-                    }
-                )
+        if not para:  # Only skip completely empty paragraphs
+            continue
+        sections.append(
+            TextSection(
+                section_id=str(uuid.uuid4()),
+                format_type="text",
+                content=para,
+                metadata={
+                    "section_type": "paragraph",
+                    "word_count": len(para.split()),
+                    "char_count": len(para)
+                }
             )
+        )
 
     return sections
 

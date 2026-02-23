@@ -53,21 +53,26 @@ def chunk_by_line(segments: List[Segment]) -> List[Chunk]:
     idx = 0
 
     for text, meta in segments:
-        # Normalise whitespace first
         text = text.replace('\r\n', '\n').replace('\r', '\n').strip()
-        sentences = _SENTENCE_END.split(text)
-        for sent in sentences:
-            sent = sent.strip()
-            if not sent:
+        # Split on newlines first so headings don't glue to the next sentence
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
                 continue
-            chunks.append(Chunk(
-                chunk_id=str(uuid.uuid4()),
-                text=sent,
-                method="line",
-                chunk_index=idx,
-                metadata={**meta},
-            ))
-            idx += 1
+            # Split each line further by sentence boundaries
+            sentences = _SENTENCE_END.split(line)
+            for sent in sentences:
+                sent = sent.strip()
+                if not sent:
+                    continue
+                chunks.append(Chunk(
+                    chunk_id=str(uuid.uuid4()),
+                    text=sent,
+                    method="line",
+                    chunk_index=idx,
+                    metadata={**meta},
+                ))
+                idx += 1
 
     return chunks
 
