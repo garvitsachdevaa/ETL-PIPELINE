@@ -689,6 +689,18 @@ def show_chunking_tab(result):
                 f"using **{METHOD_INFO[method][0]}**"
             )
 
+            # ── Context mode: warn if manual nr_topics was capped ─────────
+            if method == "context" and nr_topics_input is not None:
+                actual_groups = len([g for g in chunk_result.context_groups if g.topic_id != -1])
+                if nr_topics_input > actual_groups:
+                    st.warning(
+                        f"⚠️ You requested **{nr_topics_input} groups**, but BERTopic found only "
+                        f"**{actual_groups} natural topic(s)** in this document — "
+                        f"showing {actual_groups}. "
+                        f"You cannot create more groups than there are distinct semantic topics. "
+                        f"Try a document with more varied content, or switch to **Auto** mode."
+                    )
+
             # ── Context mode: show grouped view + flat view ────────────────
             if method == "context" and chunk_result.context_groups:
                 _show_context_groups(chunk_result)
