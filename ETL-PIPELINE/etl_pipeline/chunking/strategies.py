@@ -44,6 +44,8 @@ _SECTION_HEADER = re.compile(
 
 _BERTOPIC_RANDOM_SEED = 42
 _MIN_PARAGRAPHS_FOR_BERTOPIC = 4
+# Maximum number of context groups we'll ever produce for any document
+_MAX_CONTEXT_GROUPS = 8
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -249,116 +251,73 @@ def chunk_by_context(
     embeddings = model.encode(paragraphs, show_progress_bar=False, normalize_embeddings=True)
     embeddings_np = np.array(embeddings)
 
-    # ── Step 3: BERTopic (Auto) ──────────────────────────────────────────────
-    try:
-        from bertopic import BERTopic
-        from umap import UMAP
-        from hdbscan import HDBSCAN
-        from sklearn.feature_extraction.text import CountVectorizer
-    except ImportError as e:
-        raise RuntimeError(f'BERTopic dependencies missing: {e}. '
-                           'Install with: pip install bertopic umap-learn hdbscan')
+    # ── Step 3: find optimal K via silhouette, then cluster with K-Means ────
+    # K-Means with random_state is 100% deterministic: same file → same result
+    # every single run.  We scan K = 2 … min(√n, MAX_GROUPS), pick the K that
+    # maximises the cosine-silhouette score (tightest, best-separated clusters).
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import silhouette_score as sk_silhouette
 
     n = len(paragraphs)
-    n_components = max(2, min(5, n - 2))
-    n_neighbors  = max(2, min(5, n - 1))
+    max_k = min(_MAX_CONTEXT_GROUPS, max(2, int(n ** 0.5)))
 
-    umap_model  = UMAP(
-        n_components=n_components,
-        n_neighbors=n_neighbors,
-        min_dist=0.0,
-        metric='cosine',
-        random_state=_BERTOPIC_RANDOM_SEED,
-    )
-    # Scale min_cluster_size with document size so large docs get coherent
-    # groups instead of splitting into dozens of tiny clusters.
-    min_cs = max(2, n // 5)
-    hdbscan_model = HDBSCAN(
-        min_cluster_size=min_cs,
-        min_samples=1,
-        metric='euclidean',
-        cluster_selection_method='eom',
-        prediction_data=True,
-    )
-    vectorizer = CountVectorizer(stop_words='english', min_df=1)
+    best_k, best_score, best_labels = 2, -1.0, None
+    for k in range(2, max_k + 1):
+        if k >= n:
+            break
+        km = KMeans(n_clusters=k, random_state=_BERTOPIC_RANDOM_SEED, n_init=10)
+        labels = km.fit_predict(embeddings_np)
+        if len(set(labels)) < 2:
+            continue
+        score = float(sk_silhouette(embeddings_np, labels, metric='cosine'))
+        if score > best_score:
+            best_k, best_score, best_labels = k, score, labels
 
-    topic_model = BERTopic(
-        umap_model=umap_model,
-        hdbscan_model=hdbscan_model,
-        vectorizer_model=vectorizer,
-        verbose=False,
-    )
+    topics: List[int] = list(best_labels) if best_labels is not None else [0] * n
+    overall_coherence = round(float(best_score), 4) if best_score > -1.0 else 0.0
 
-    topics, _ = topic_model.fit_transform(paragraphs, embeddings=embeddings_np)
+    # ── Step 4: extract top keywords per cluster via TF-IDF ──────────────────
+    from sklearn.feature_extraction.text import TfidfVectorizer
 
-    # ── Reassign outliers (topic -1) to the nearest real topic ───────────────
-    # Outliers are paragraphs HDBSCAN couldn't confidently cluster. Instead of
-    # surfacing them as noise, assign each one to the topic whose centroid it
-    # is closest to (cosine similarity).
-    tmp_centroids: Dict[int, np.ndarray] = {}
-    for tid in set(t for t in topics if t != -1):
-        idxs = [i for i, t in enumerate(topics) if t == tid]
-        tmp_centroids[tid] = embeddings_np[idxs].mean(axis=0)
+    cluster_texts: Dict[int, List[str]] = {}
+    for i, tid in enumerate(topics):
+        cluster_texts.setdefault(tid, []).append(paragraphs[i])
 
-    if tmp_centroids:  # only reassign when there are real topics
-        for i, t in enumerate(topics):
-            if t == -1:
-                best_tid = max(
-                    tmp_centroids,
-                    key=lambda tid: float(np.dot(embeddings_np[i], tmp_centroids[tid])),
-                )
-                topics[i] = best_tid
+    tfidf = TfidfVectorizer(stop_words='english', max_features=500, ngram_range=(1, 2))
+    try:
+        sorted_tids = sorted(cluster_texts)
+        all_docs = [' '.join(cluster_texts[tid]) for tid in sorted_tids]
+        tfidf_matrix = tfidf.fit_transform(all_docs)
+        feature_names = tfidf.get_feature_names_out()
+        cluster_keywords: Dict[int, List[str]] = {}
+        for row_idx, tid in enumerate(sorted_tids):
+            row = tfidf_matrix[row_idx].toarray()[0]
+            top_idxs = row.argsort()[-6:][::-1]
+            cluster_keywords[tid] = [feature_names[j] for j in top_idxs if row[j] > 0]
+    except Exception:
+        cluster_keywords = {tid: [] for tid in cluster_texts}
 
-    # ── Step 4: overall silhouette coherence score ───────────────────────────
-    overall_coherence = _silhouette_score(embeddings_np, topics)
-
-    # ── Step 5: per-paragraph similarity to topic centroid ──────────────────
-    # Build centroids per topic (mean of embeddings)
-    unique_topics = sorted(set(t for t in topics if t != -1))
+    # ── Step 5: per-paragraph cosine similarity to cluster centroid ───────────
+    unique_topics = sorted(set(topics))
     centroids: Dict[int, np.ndarray] = {}
     for tid in unique_topics:
         idxs = [i for i, t in enumerate(topics) if t == tid]
         centroids[tid] = embeddings_np[idxs].mean(axis=0)
 
-    # Get topic info for labels/words
-    try:
-        topic_info = topic_model.get_topic_info()
-    except Exception:
-        topic_info = None
-
     def _topic_label(tid: int) -> str:
-        """Return a clean human-readable label, stripping BERTopic's N_w_w_w prefix."""
-        if topic_info is not None:
-            row = topic_info[topic_info['Topic'] == tid]
-            if not row.empty and 'Name' in row.columns:
-                raw = str(row.iloc[0]['Name'])
-                # BERTopic names look like "0_cancer_patient_study" — strip leading N_
-                clean = re.sub(r'^-?\d+_', '', raw)
-                clean = clean.replace('_', ' ').title()
-                if clean:
-                    return clean
-        words = _topic_words(tid)
-        return ', '.join(words[:3]).title() if words else f'Group {tid + 1}'
+        words = cluster_keywords.get(tid, [])
+        return ', '.join(w.title() for w in words[:3]) if words else f'Group {tid + 1}'
 
     def _topic_words(tid: int) -> List[str]:
-        try:
-            return [w for w, _ in (topic_model.get_topic(tid) or [])[:5]]
-        except Exception:
-            return []
+        return cluster_keywords.get(tid, [])
 
     # ── Step 6: build Chunk objects per paragraph ────────────────────────────
     all_chunks: List[Chunk] = []
     topic_to_chunks: Dict[int, List[Chunk]] = {}
 
-    outlier_group_id   = str(uuid.uuid4())
-    outlier_topic_id   = -1
-
     for i, (para, meta, topic_id) in enumerate(zip(paragraphs, para_metas, topics)):
-        # Similarity to centroid (cosine — embeddings already L2-normalised)
-        if topic_id != -1 and topic_id in centroids:
-            sim = float(np.dot(embeddings_np[i], centroids[topic_id]))
-        else:
-            sim = 0.0
+        # Cosine similarity to cluster centroid (embeddings are L2-normalised)
+        sim = float(np.dot(embeddings_np[i], centroids[topic_id])) if topic_id in centroids else 0.0
 
         chunk = Chunk(
             chunk_id=str(uuid.uuid4()),
@@ -368,8 +327,8 @@ def chunk_by_context(
             metadata={
                 **meta,
                 'topic_id': int(topic_id),
-                'topic_label': _topic_label(topic_id) if topic_id != -1 else 'outlier',
-                'topic_words': _topic_words(topic_id) if topic_id != -1 else [],
+                'topic_label': _topic_label(topic_id),
+                'topic_words': _topic_words(topic_id),
             },
             similarity_score=round(sim, 4),
         )
@@ -385,19 +344,13 @@ def chunk_by_context(
     # ── Step 7: build ContextGroups ──────────────────────────────────────────
     context_groups: List[ContextGroup] = []
 
-    # Non-outlier topics
     for tid in unique_topics:
         group_chunks = topic_to_chunks.get(tid, [])
         if not group_chunks:
             continue
 
         merged_text = '\n\n'.join(c.text for c in group_chunks)
-        avg_sim     = round(sum(c.similarity_score for c in group_chunks) / len(group_chunks), 4)
-
-        # Intra-group coherence (silhouette of this group vs others)
-        group_idxs = [i for i, t in enumerate(topics) if t == tid]
-        group_coherence = _silhouette_score(embeddings_np, topics, subset=group_idxs)
-
+        avg_sim = round(sum(c.similarity_score for c in group_chunks) / len(group_chunks), 4)
         label = _topic_label(tid)
         words = _topic_words(tid)
 
@@ -422,39 +375,8 @@ def chunk_by_context(
             topic_words=words,
             merged_chunk=merged_chunk,
             source_chunks=group_chunks,
-            coherence_score=group_coherence,
+            coherence_score=avg_sim,
         ))
 
-    # Sort groups by topic_id for stable order
-    context_groups.sort(key=lambda g: (g.topic_id == -1, g.topic_id))
-
+    context_groups.sort(key=lambda g: g.topic_id)
     return all_chunks, context_groups, overall_coherence
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _silhouette_score(
-    embeddings: 'np.ndarray',
-    topics: List[int],
-    subset: List[int] | None = None,
-) -> float:
-    """
-    Silhouette score for topic assignments.
-    Returns a value in [-1, 1]; higher is better.
-    Returns 0.0 when there is not enough data to compute.
-    """
-    try:
-        import numpy as np
-        from sklearn.metrics import silhouette_score
-
-        valid_idx = [i for i, t in enumerate(topics) if t != -1]
-        if len(valid_idx) < 4:
-            return 0.0
-        valid_labels = [topics[i] for i in valid_idx]
-        if len(set(valid_labels)) < 2:
-            return 0.0
-        valid_emb = embeddings[valid_idx]
-        score = silhouette_score(valid_emb, valid_labels, metric='cosine')
-        return round(float(score), 4)
-    except Exception:
-        return 0.0

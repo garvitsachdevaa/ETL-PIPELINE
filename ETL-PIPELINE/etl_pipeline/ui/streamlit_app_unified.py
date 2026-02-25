@@ -782,11 +782,8 @@ def _show_context_groups(chunk_result):
             "The document may not have clearly distinct topics, or may be too short for BERTopic."
         )
 
-    groups = [g for g in chunk_result.context_groups if g.topic_id != -1]
-    outliers = [g for g in chunk_result.context_groups if g.topic_id == -1]
-
-    st.markdown(f"**{len(groups)} semantic group(s) detected**"
-                + (f"  ·  {sum(len(g.source_chunks) for g in outliers)} outlier paragraph(s) unassigned" if outliers else ""))
+    groups = chunk_result.context_groups
+    st.markdown(f"**{len(groups)} semantic group(s) detected**")
     st.markdown("---")
 
     for g in groups:
@@ -819,13 +816,6 @@ def _show_context_groups(chunk_result):
                         st.markdown(f"> {c.text}")
                         st.divider()
 
-    # Outlier paragraphs at the bottom, collapsed by default
-    if outliers:
-        with st.expander("⚠️ Unassigned paragraphs (outliers)", expanded=False):
-            for g in outliers:
-                for c in g.source_chunks:
-                    st.markdown(f"> {c.text}")
-                    st.divider()
 
 
 if __name__ == "__main__":
