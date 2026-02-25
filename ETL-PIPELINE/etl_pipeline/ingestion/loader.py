@@ -7,6 +7,7 @@ from ingestion.schemas import DocumentObject
 
 def load_input(file=None, text=None):
     if file:
+        file.seek(0)           # reset pointer — safe even on first read
         return file.name, file.read(), None
     if text:
         return "direct_text_input", None, text

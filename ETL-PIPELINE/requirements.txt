@@ -29,11 +29,6 @@ doclayout-yolo
 # Marker: layout + OCR in one pass for text-based PDFs (uses Surya internally)
 marker-pdf
 
-# ── Chunking & Context (Phase 3) ─────────────────────────────────────────────
-# Semantic chunking via BERTopic + sentence-transformers
-sentence-transformers>=2.7.0
-bertopic>=0.16.0
-
 # ── VLM dependencies (PaliGemma kept for VQA only) ───────────────────────────
 # bitsandbytes intentionally excluded — CUDA build fails on L4
 transformers>=4.46.0

@@ -130,14 +130,7 @@ def show_single_file_interface(uploaded_file):
     """Interface for single file processing"""
     st.markdown("---")
     st.info(f"📄 **Single File Mode** - Processing: `{uploaded_file.name}`")
-
-    # Clear cached results when a different file is loaded
-    if st.session_state.get("_last_file") != uploaded_file.name:
-        st.session_state.pop("_result", None)
-        st.session_state.pop("_output_data", None)
-        st.session_state.pop("_source_name", None)
-        st.session_state["_last_file"] = uploaded_file.name
-
+    
     # File details
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -146,13 +139,15 @@ def show_single_file_interface(uploaded_file):
         st.metric("File Size", f"{uploaded_file.size/1024:.1f} KB")
     with col3:
         st.metric("File Type", uploaded_file.type or "Unknown")
-
+    
     # Process button
     if st.button("🔄 Process Document", type="primary", use_container_width=True):
+        # Clear stale chunk results when re-processing
+        st.session_state.pop("_chunk_result", None)
         process_single_file(uploaded_file)
 
-    # Re-render results if they are already in session state (survives tab/button reruns)
-    elif "_result" in st.session_state and st.session_state.get("_last_file") == uploaded_file.name:
+    # Show persisted results from previous processing (survives reruns)
+    elif "_result" in st.session_state and st.session_state.get("_source_name") == uploaded_file.name:
         show_processing_results(
             st.session_state["_output_data"],
             st.session_state["_source_name"],
@@ -163,30 +158,15 @@ def show_text_interface(text_input):
     """Interface for text input processing"""
     st.markdown("---")
     st.info(f"📝 **Text Input Mode** - Processing {len(text_input)} characters")
-
-    # Clear cached results when text content changes
-    if st.session_state.get("_last_text") != text_input:
-        st.session_state.pop("_result", None)
-        st.session_state.pop("_output_data", None)
-        st.session_state.pop("_source_name", None)
-        st.session_state["_last_text"] = text_input
-
+    
     # Text preview
     with st.expander("📖 Text Preview", expanded=False):
-        st.text_area("", value=text_input[:500] + "..." if len(text_input) > 500 else text_input,
+        st.text_area("", value=text_input[:500] + "..." if len(text_input) > 500 else text_input, 
                     height=100, disabled=True)
-
+    
     # Process button
     if st.button("🔄 Process Text", type="primary", use_container_width=True):
         process_single_text(text_input)
-
-    # Re-render results if already in session state
-    elif "_result" in st.session_state and st.session_state.get("_last_text") == text_input:
-        show_processing_results(
-            st.session_state["_output_data"],
-            st.session_state["_source_name"],
-            st.session_state["_result"],
-        )
 
 def show_batch_interface(uploaded_files):
     """Interface for batch processing"""
@@ -263,10 +243,6 @@ def process_single_text(text_input):
             }
             _status.update(label="✅ Text processed!", state="complete", expanded=False)
 
-        # Persist so chunking tab survives reruns
-        st.session_state["_result"] = result
-        st.session_state["_output_data"] = output_data
-        st.session_state["_source_name"] = "text_input"
         show_processing_results(output_data, "text_input", result)
 
     except Exception as e:
@@ -328,8 +304,8 @@ def process_single_file(uploaded_file):
             _status.update(label=f"✅ **{uploaded_file.name}** processed!",
                            state="complete", expanded=False)
 
-        # Persist so chunking tab survives reruns
-        st.session_state["_result"] = result
+        # Persist so results survive reruns (e.g. clicking Run Chunking)
+        st.session_state["_result"]      = result
         st.session_state["_output_data"] = output_data
         st.session_state["_source_name"] = uploaded_file.name
         show_processing_results(output_data, uploaded_file.name, result)
@@ -355,13 +331,13 @@ def show_processing_results(output_data, source_name, result):
 
     # Processing results with tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Extracted Content", "🔍 Technical Details", "📦 Export & Download", "🗂️ Chunk & Context"])
-    
+
     with tab1:
         show_extracted_content(result)
-    
+
     with tab2:
         show_technical_details(output_data)
-    
+
     with tab3:
         show_export_options(output_data, source_name, result)
 
@@ -598,316 +574,6 @@ def show_export_options(output_data, source_name, result):
     with st.expander("Show Complete Processing Results", expanded=False):
         st.json(output_data)
 
-def show_chunking_tab(result):
-    """
-    Chunking & Context tab — lets the user pick a chunking strategy,
-    runs it against the already-extracted document, and displays the
-    output ready for the downstream SLM extractor.
-    """
-    st.subheader("🗂️ Chunk & Context")
-    st.markdown(
-        "Choose how to split the extracted text into chunks. "
-        "The result is the input your fine-tuned SLM will consume for "
-        "entity and relation extraction."
-    )
-
-    # ── Method selector ─────────────────────────────────────────────────────
-    METHOD_INFO = {
-        "line":      ("📄 Line by Line",          "Each non-empty line becomes one chunk."),
-        "paragraph": ("📝 Paragraph by Paragraph", "Blank-line boundaries define paragraphs."),
-        "section":   ("📑 Section by Section",     "Detects headings, chapter markers, horizontal rules."),
-        "context":   ("🧠 By Context (BERTopic)",  
-                      "Paragraph-level base split → sentence-transformers embeddings → "
-                      "BERTopic topic assignment. Semantically related paragraphs "
-                      "(e.g. all mentions of 'John') are grouped into the same "
-                      "ContextGroup, even if they appear on different pages."),
-    }
-
-    method = st.radio(
-        "Select chunking method:",
-        options=list(METHOD_INFO.keys()),
-        format_func=lambda k: METHOD_INFO[k][0],
-        horizontal=True,
-    )
-
-    # Description beneath the selector
-    st.caption(f"ℹ️ {METHOD_INFO[method][1]}")
-
-    # ── Context-mode grouping controls ──────────────────────────────────
-    nr_topics_input: int | None = None  # default for non-context modes
-    if method == "context":
-        st.info(
-            "**BERTopic mode** will:\n"
-            "1. Split text into paragraphs first\n"
-            "2. Generate sentence-transformer embeddings\n"
-            "3. Cluster semantically similar paragraphs → ContextGroups\n\n"
-            "First run loads the embedding model (~90 MB). "
-            "Requires ≥5 paragraphs — short documents fall back to paragraph mode."
-        )
-
-        st.markdown("**Number of Context Groups**")
-        col_mode, col_input = st.columns([1, 1])
-        with col_mode:
-            grouping_mode = st.radio(
-                "Mode",
-                options=["Auto", "Manual"],
-                horizontal=True,
-                label_visibility="collapsed",
-                help="Auto: BERTopic finds the natural number of topics. Manual: you decide.",
-            )
-        with col_input:
-            if grouping_mode == "Manual":
-                nr_topics_input = st.number_input(
-                    "Number of groups",
-                    min_value=2,
-                    max_value=50,
-                    value=4,
-                    step=1,
-                    help=(
-                        "How many context groups to create. "
-                        "BERTopic first finds all natural topics, then merges "
-                        "down to this number. If you ask for more than naturally "
-                        "exist, the natural count is kept."
-                    ),
-                )
-            else:
-                st.caption(
-                    "🤖 BERTopic will find the optimal number of natural topic groups automatically."
-                )
-
-    st.markdown("---")
-
-    # ── Run chunking ────────────────────────────────────────────────────────
-    if st.button("▶️ Run Chunking", type="primary", use_container_width=True):
-        try:
-            from chunking import Chunker
-            with st.spinner(f"Chunking document ({METHOD_INFO[method][0]})…"):
-                chunk_result = Chunker.chunk(result, method=method, nr_topics=nr_topics_input)
-
-            st.success(
-                f"✅ **{chunk_result.total_chunks}** chunk(s) produced "
-                f"using **{METHOD_INFO[method][0]}**"
-            )
-
-            # ── Context mode: warn if manual nr_topics was capped ─────────
-            if method == "context" and nr_topics_input is not None:
-                actual_groups = len([g for g in chunk_result.context_groups if g.topic_id != -1])
-                if nr_topics_input > actual_groups:
-                    st.warning(
-                        f"⚠️ You requested **{nr_topics_input} groups**, but BERTopic found only "
-                        f"**{actual_groups} natural topic(s)** in this document — "
-                        f"showing {actual_groups}. "
-                        f"You cannot create more groups than there are distinct semantic topics. "
-                        f"Try a document with more varied content, or switch to **Auto** mode."
-                    )
-
-            # ── Context mode: show grouped view + flat view ────────────────
-            if method == "context" and chunk_result.context_groups:
-                _show_context_groups(chunk_result)
-            else:
-                _show_flat_chunks(chunk_result)
-
-            # ── SLM payload download ───────────────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📤 Send to SLM Extractor")
-            payload_json = json.dumps(chunk_result.slm_payload, indent=2, ensure_ascii=False)
-            st.download_button(
-                label="📥 Download SLM Payload (JSON)",
-                data=payload_json,
-                file_name=f"slm_payload_{method}_{chunk_result.total_chunks}chunks.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-            with st.expander("Preview SLM Payload", expanded=False):
-                st.json(chunk_result.slm_payload)
-
-        except ImportError as ie:
-            st.error(f"❌ Missing dependency: {ie}")
-        except Exception as exc:
-            st.error(f"❌ Chunking failed: {exc}")
-            with st.expander("🐛 Error Details"):
-                st.exception(exc)
-
-
-def _show_flat_chunks(chunk_result):
-    """Display flat list of chunks (line / paragraph / section modes)."""
-    st.subheader(f"📦 {chunk_result.total_chunks} Chunks")
-
-    # Search / filter
-    search = st.text_input("🔍 Filter chunks:", placeholder="Keyword to search…")
-    chunks = chunk_result.chunks
-    if search:
-        chunks = [c for c in chunks if search.lower() in c.text.lower()]
-        st.caption(f"{len(chunks)} chunk(s) match '{search}'")
-
-    # Show first 50 to avoid overwhelming the UI
-    display_chunks = chunks[:50]
-    for chunk in display_chunks:
-        page_info = ""
-        if "page_number" in chunk.metadata:
-            page_info = f" · Page {chunk.metadata['page_number']}"
-        label_info = ""
-        if "block_label" in chunk.metadata:
-            label_info = f" · `{chunk.metadata['block_label']}`"
-        if "format_type" in chunk.metadata:
-            label_info = f" · `{chunk.metadata['format_type']}`"
-
-        with st.expander(
-            f"Chunk {chunk.chunk_index + 1}{page_info}{label_info} — "
-            f"{len(chunk.text)} chars",
-            expanded=False,
-        ):
-            st.text_area("", value=chunk.text, height=120, disabled=True,
-                         key=f"flat_chunk_{chunk.chunk_id}")
-            st.json(chunk.metadata, expanded=False)
-
-    if len(chunks) > 50:
-        st.info(f"Showing 50 of {len(chunks)} chunks. Download the SLM payload to see all.")
-
-
-def _show_context_groups(chunk_result):
-    """Display BERTopic context groups (Scenario C).
-
-    Each ContextGroup exposes:
-      - merged_chunk  : ONE combined chunk the SLM receives
-      - source_chunks : individual paragraphs with cosine similarity scores
-    """
-    groups        = chunk_result.context_groups
-    named_groups  = [g for g in groups if g.topic_id != -1]
-    outlier_groups = [g for g in groups if g.topic_id == -1]
-    individual    = chunk_result.chunks   # all paragraphs in doc order
-
-    # ── Header ────────────────────────────────────────────────────────────
-    col_a, col_b = st.columns(2)
-    col_a.metric("Context Groups (merged)", len(named_groups))
-    col_b.metric("Individual Paragraphs", len(individual))
-
-    st.caption(
-        "Each group's **merged chunk** is what the SLM receives. "
-        "Expand a group to also inspect every source paragraph with its "
-        "cosine-similarity score to the topic centroid."
-    )
-    if outlier_groups:
-        n_out = len(outlier_groups[0].source_chunks) if outlier_groups[0].source_chunks else 0
-        st.caption(f"+ 1 outlier group — **{n_out}** paragraph(s) with no clear topic (topic_id = -1)")
-
-    st.markdown("---")
-
-    # ── Per-group display ──────────────────────────────────────────────────
-    for group in groups:
-        is_outlier   = group.topic_id == -1
-        icon         = "🔘" if is_outlier else "🏷️"
-        label        = group.topic_label
-        kw_str       = "  ·  ".join(f"`{w}`" for w, _ in group.topic_words[:5]) \
-                       if group.topic_words else "_(no keywords)_"
-        merged       = group.merged_chunk            # new field
-        srcs         = group.source_chunks           # new field — list of Chunk with sim scores
-        para_count   = len(srcs)
-        merged_len   = len(merged.text) if merged else 0
-        avg_sim      = merged.metadata.get("avg_similarity_score", 0.0) if merged else 0.0
-
-        with st.expander(
-            f"{icon} **{label}**  ·  {para_count} paragraph(s) merged  ·  "
-            f"{merged_len} chars  ·  avg sim {avg_sim:.2f}",
-            expanded=(not is_outlier),
-        ):
-            # Keywords row
-            st.markdown(f"**Top keywords:** {kw_str}")
-            if merged:
-                src_indices = merged.metadata.get("source_paragraph_indices", [])
-                if src_indices:
-                    st.caption(f"Source paragraph positions (0-based in document): {src_indices}")
-            st.markdown("---")
-
-            # ── TAB 1: Merged chunk for the SLM ──────────────────────────
-            tab_merged, tab_individual = st.tabs(
-                ["📦 Merged — SLM Input", "🔍 Individual Paragraphs + Similarity"]
-            )
-
-            with tab_merged:
-                if merged:
-                    st.text_area(
-                        "Merged text sent to SLM",
-                        value=merged.text,
-                        height=250,
-                        disabled=True,
-                        key=f"merged_{group.topic_id}",
-                    )
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Characters", len(merged.text))
-                    c2.metric("Paragraphs merged", para_count)
-                    c3.metric("Avg similarity", f"{avg_sim:.3f}")
-                else:
-                    st.info("No merged chunk (outlier group).")
-
-            # ── TAB 2: Individual paragraphs with similarity scores ───────
-            with tab_individual:
-                if not srcs:
-                    st.info("No source paragraphs.")
-                for i, para in enumerate(srcs):
-                    sim   = para.similarity_score
-                    n_rel = len(para.related_chunk_ids)
-
-                    # Colour-code similarity badge
-                    if sim >= 0.75:
-                        badge_colour = "🟢"
-                    elif sim >= 0.50:
-                        badge_colour = "🟡"
-                    else:
-                        badge_colour = "🔴"
-
-                    with st.expander(
-                        f"Para {para.chunk_index + 1}  "
-                        f"{badge_colour} sim={sim:.3f}  ·  {len(para.text)} chars  "
-                        f"·  related to {n_rel} other para(s)",
-                        expanded=False,
-                    ):
-                        st.text_area(
-                            "",
-                            value=para.text,
-                            height=100,
-                            disabled=True,
-                            key=f"src_para_{group.topic_id}_{i}",
-                            label_visibility="collapsed",
-                        )
-                        meta_display = {
-                            "similarity_score": sim,
-                            "related_chunk_ids": para.related_chunk_ids,
-                            "topic_id": para.metadata.get("topic_id"),
-                            "chunk_id": para.chunk_id,
-                        }
-                        st.json(meta_display, expanded=False)
-
-    # ── Flat view of ALL individual paragraphs in document order ──────────
-    if individual:
-        st.markdown("---")
-        with st.expander(
-            f"📄 All {len(individual)} individual paragraph(s) in document order",
-            expanded=False,
-        ):
-            st.caption(
-                "Every paragraph in its original position, tagged with topic label "
-                "and similarity score. This mirrors what is sent in the `individual_chunks` "
-                "field of the SLM payload."
-            )
-            for para in individual:
-                sim   = para.similarity_score
-                badge = "🟢" if sim >= 0.75 else ("🟡" if sim >= 0.50 else "🔴")
-                topic = para.metadata.get("topic_label", "outlier")
-                st.markdown(
-                    f"**Para {para.chunk_index + 1}** — `{topic}`  "
-                    f"{badge} sim={sim:.3f}"
-                )
-                st.text_area(
-                    "",
-                    value=para.text,
-                    height=80,
-                    disabled=True,
-                    key=f"all_para_{para.chunk_id}",
-                    label_visibility="collapsed",
-                )
-
-
 def process_batch_files(uploaded_files, max_workers, use_processes, save_outputs):
     """Process multiple files using batch logic"""
     from ingestion.batch_processor import BatchProcessor, _process_single_file_task
@@ -1049,6 +715,101 @@ def show_batch_results(job, total_time):
         
         with st.expander("Preview Batch Results JSON"):
             st.json(full_results)
+
+def show_chunking_tab(result):
+    """🗂️ Chunk & Context tab."""
+    st.subheader("🗂️ Chunk & Context")
+    st.caption(
+        "Split the extracted text into chunks and optionally group them "
+        "semantically using BERTopic."
+    )
+
+    METHOD_INFO = {
+        "line":      ("📄 Line by Line",       "Every sentence becomes one chunk — finest granularity."),
+        "paragraph": ("📝 Paragraph by Paragraph", "Each blank-line block becomes one chunk."),
+        "section":   ("📑 Section by Section", "Groups text by detected headings (##, 1., CHAPTER …)."),
+        "context":   ("🧠 Semantic Context",   "BERTopic clusters paragraphs by topic automatically."),
+    }
+
+    method = st.radio(
+        "Select chunking method:",
+        list(METHOD_INFO.keys()),
+        format_func=lambda k: METHOD_INFO[k][0],
+        horizontal=True,
+    )
+    st.caption(METHOD_INFO[method][1])
+
+    if st.button("▶️ Run Chunking", type="primary", use_container_width=True):
+        from chunking import Chunker
+        with st.spinner(f"Chunking document ({METHOD_INFO[method][0]})…"):
+            chunk_result = Chunker.chunk(result, method=method)
+        st.session_state["_chunk_result"] = chunk_result
+
+    if "_chunk_result" not in st.session_state:
+        return
+
+    chunk_result = st.session_state["_chunk_result"]
+    # Reset if method changed
+    if chunk_result.method != method:
+        return
+
+    st.success(f"✅ {chunk_result.total_chunks} chunks created")
+
+    if method == "context":
+        _show_context_groups(chunk_result)
+    else:
+        _show_flat_chunks(chunk_result)
+
+
+def _show_flat_chunks(chunk_result):
+    """Display line / paragraph / section chunks."""
+    for c in chunk_result.chunks:
+        with st.expander(f"[{c.chunk_index}] {c.text[:60]}…" if len(c.text) > 60 else f"[{c.chunk_index}] {c.text}"):
+            st.write(c.text)
+
+
+def _show_context_groups(chunk_result):
+    """Display BERTopic context groups with coherence score."""
+    score = chunk_result.coherence_score
+
+    # Coherence badge
+    if score >= 0.55:
+        st.success(f"✅ Strong topic separation — coherence score: **{score:.2f}**")
+    elif score >= 0.30:
+        st.warning(f"⚠️ Moderate topic separation — coherence score: **{score:.2f}**")
+    else:
+        st.error(
+            f"❌ Weak separation — coherence score: **{score:.2f}**  \n"
+            "The document may not have clearly distinct topics, or it may be too short."
+        )
+
+    st.markdown(f"**{len(chunk_result.context_groups)} semantic group(s) detected**")
+    st.markdown("---")
+
+    for g in chunk_result.context_groups:
+        label = g.topic_label or f"Group {g.topic_id}"
+        words = ", ".join(g.topic_words) if g.topic_words else "—"
+        header = f"**{label}**  ·  {len(g.source_chunks)} paragraph(s)  ·  coherence {g.coherence_score:.2f}"
+
+        with st.expander(header, expanded=True):
+            t1, t2 = st.tabs(["📦 Merged — SLM Input", "🔍 Individual Paragraphs"])
+
+            with t1:
+                st.caption(f"Keywords: {words}")
+                avg_sim = g.merged_chunk.metadata.get("avg_similarity_score", 0.0) if g.merged_chunk else 0.0
+                st.caption(f"Avg similarity to centroid: {avg_sim:.2f}")
+                merged_text = g.merged_chunk.text if g.merged_chunk else ""
+                st.text_area("", value=merged_text, height=180, disabled=True,
+                             key=f"merged_{g.group_id}")
+
+            with t2:
+                for c in g.source_chunks:
+                    sim_pct = int(c.similarity_score * 100)
+                    colour  = "🟢" if sim_pct >= 70 else "🟡" if sim_pct >= 40 else "🔴"
+                    st.markdown(f"{colour} similarity **{sim_pct}%**")
+                    st.text_area("", value=c.text, height=80, disabled=True,
+                                 key=f"src_{c.chunk_id}")
+
 
 if __name__ == "__main__":
     main()

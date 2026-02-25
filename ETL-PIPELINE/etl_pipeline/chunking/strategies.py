@@ -1,21 +1,18 @@
 """
 chunking/strategies.py
 ----------------------
-Four chunking strategies exposed as pure functions.
+Four pure-function chunking strategies.
 
-All strategies accept a list of (text, source_metadata) tuples — the
-"segments" extracted from a document — and return a flat list of Chunk
-objects.  The caller (chunker.py) is responsible for building those
-segments from either a TextDocument or a BinaryDocument.
+All strategies accept a list of (text, source_metadata) tuples and return
+a flat list of Chunk objects plus (for context mode) a list of ContextGroups.
 
 Strategies
 ----------
-chunk_by_line      — split each segment on newline boundaries
-chunk_by_paragraph — split each segment on blank-line boundaries
-chunk_by_section   — split on detected structural headers / dividers
-chunk_by_context   — paragraph-level base split → sentence-transformers
-                     embeddings → BERTopic topic assignment →
-                     ContextGroup clustering
+chunk_by_line      — finest: split on newlines, then sentence boundaries
+chunk_by_paragraph — medium: split on blank lines
+chunk_by_section   — structural: split on detected headers
+chunk_by_context   — semantic: BERTopic topic clustering (Auto only)
+                     includes silhouette coherence scoring
 """
 
 from __future__ import annotations
@@ -29,46 +26,52 @@ from chunking.schemas import Chunk, ContextGroup
 
 logger = logging.getLogger(__name__)
 
-# ── Type alias ───────────────────────────────────────────────────────────────
-# Each segment is (text_content, source_metadata_dict)
+# Type alias: each segment is (text_content, source_metadata_dict)
 Segment = Tuple[str, Dict[str, Any]]
 
-
-# Sentence boundary: after . ! ? followed by whitespace or end of string
+# Sentence boundary: after . ! ? followed by whitespace or end-of-string
 _SENTENCE_END = re.compile(r'(?<=[.!?])(?:\s+|$)')
+
+# Lines that look like structural headings (must occupy a full line)
+_SECTION_HEADER = re.compile(
+    r'(?m)^(?:'
+    r'#{1,6}\s+\S.*'                               # ## Markdown heading
+    r'|\d+[.)]\s+[A-Z]\S*.*'                       # 1. Title  /  2) Title
+    r'|(?:Chapter|Section|Part|Appendix)\s+\S.*'   # Chapter One / Section 2
+    r'|[A-Z][A-Z ]{3,60}$'                         # ALL CAPS TITLE LINE
+    r')$'
+)
+
+_BERTOPIC_RANDOM_SEED = 42
+_MIN_PARAGRAPHS_FOR_BERTOPIC = 4
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. LINE CHUNKING  (sentence-level — finest granularity)
+# 1. LINE  (sentence-level — finest granularity)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def chunk_by_line(segments: List[Segment]) -> List[Chunk]:
     """
-    Split every segment into individual sentences.
-    Uses punctuation-based sentence detection (. ! ?) so that even
-    single-line paragraphs are broken into multiple chunks, giving
-    meaningfully finer granularity than paragraph mode.
+    Split each segment on newlines first so headings stay separate,
+    then split each non-empty line further by sentence boundaries.
     """
     chunks: List[Chunk] = []
     idx = 0
 
     for text, meta in segments:
         text = text.replace('\r\n', '\n').replace('\r', '\n').strip()
-        # Split on newlines first so headings don't glue to the next sentence
         for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
-            # Split each line further by sentence boundaries
-            sentences = _SENTENCE_END.split(line)
-            for sent in sentences:
+            for sent in _SENTENCE_END.split(line):
                 sent = sent.strip()
                 if not sent:
                     continue
                 chunks.append(Chunk(
                     chunk_id=str(uuid.uuid4()),
                     text=sent,
-                    method="line",
+                    method='line',
                     chunk_index=idx,
                     metadata={**meta},
                 ))
@@ -78,26 +81,24 @@ def chunk_by_line(segments: List[Segment]) -> List[Chunk]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. PARAGRAPH CHUNKING
+# 2. PARAGRAPH  (blank-line boundaries)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def chunk_by_paragraph(segments: List[Segment]) -> List[Chunk]:
-    """
-    Split every segment on blank-line boundaries (one or more \\n).
-    Each non-empty paragraph becomes one Chunk.
-    """
+    """Each blank-line-separated block becomes one Chunk."""
     chunks: List[Chunk] = []
     idx = 0
 
     for text, meta in segments:
-        for para in re.split(r"\n{2,}", text):
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        for para in re.split(r'\n{2,}', text):
             para = para.strip()
             if not para:
                 continue
             chunks.append(Chunk(
                 chunk_id=str(uuid.uuid4()),
                 text=para,
-                method="paragraph",
+                method='paragraph',
                 chunk_index=idx,
                 metadata={**meta},
             ))
@@ -107,61 +108,47 @@ def chunk_by_paragraph(segments: List[Segment]) -> List[Chunk]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. SECTION CHUNKING
+# 3. SECTION  (header-guided grouping)
 # ═══════════════════════════════════════════════════════════════════════════
-
-# A line that looks like a structural heading.
-# Must occupy a full line on its own (no trailing prose on the same line
-# that would make it look like a normal sentence).
-_SECTION_PATTERN = re.compile(
-    r"(?m)^(?:"
-    r"#{1,6}\s+\S.*"                               # ## Markdown heading
-    r"|\d+[.)]\s+[A-Z]\S*.*"                       # 1. Title  /  2) Title
-    r"|(?:Chapter|Section|Part|Appendix)\s+\S.*"   # Chapter One / Section 2
-    r"|[A-Z][A-Z ]{3,60}$"                         # ALL CAPS TITLE LINE
-    r")$"
-)
-
 
 def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
     """
-    Split every segment at detected structural headers (## Markdown,
-    numbered headings, ALL-CAPS titles, Chapter/Section keywords).
-    Each section (header line + body) becomes one Chunk.
-    Falls back to paragraph splitting when no structural markers are found.
+    Detect structural headers (## Markdown, numbered, ALL-CAPS, Chapter/Section).
+    Each header + its following body becomes one Chunk.
+    Falls back to paragraph chunking when no headers are detected.
     """
     chunks: List[Chunk] = []
     idx = 0
 
     for text, meta in segments:
         text = text.replace('\r\n', '\n').replace('\r', '\n')
-        boundaries = [m.start() for m in _SECTION_PATTERN.finditer(text)]
+        boundaries = [m.start() for m in _SECTION_HEADER.finditer(text)]
 
         if not boundaries:
-            # No structural markers → fall back to paragraph split
-            for para in re.split(r"\n{2,}", text):
+            # No structural markers → paragraph fallback
+            for para in re.split(r'\n{2,}', text):
                 para = para.strip()
                 if para:
                     chunks.append(Chunk(
                         chunk_id=str(uuid.uuid4()),
                         text=para,
-                        method="section",
+                        method='section',
                         chunk_index=idx,
-                        metadata={**meta, "section_detected": False},
+                        metadata={**meta, 'section_detected': False},
                     ))
                     idx += 1
             continue
 
-        # Capture any preamble text that appears before the first header
+        # Capture any preamble before the first header
         if boundaries[0] > 0:
             preamble = text[:boundaries[0]].strip()
             if preamble:
                 chunks.append(Chunk(
                     chunk_id=str(uuid.uuid4()),
                     text=preamble,
-                    method="section",
+                    method='section',
                     chunk_index=idx,
-                    metadata={**meta, "section_detected": False, "section_number": 0},
+                    metadata={**meta, 'section_detected': False, 'section_number': 0},
                 ))
                 idx += 1
 
@@ -173,9 +160,9 @@ def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
             chunks.append(Chunk(
                 chunk_id=str(uuid.uuid4()),
                 text=section_text,
-                method="section",
+                method='section',
                 chunk_index=idx,
-                metadata={**meta, "section_detected": True, "section_number": i + 1},
+                metadata={**meta, 'section_detected': True, 'section_number': i + 1},
             ))
             idx += 1
 
@@ -183,262 +170,265 @@ def chunk_by_section(segments: List[Segment]) -> List[Chunk]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. CONTEXT CHUNKING  (BERTopic)
+# 4. CONTEXT  (BERTopic semantic clustering — Auto, with coherence score)
 # ═══════════════════════════════════════════════════════════════════════════
-
-_MIN_CHUNKS_FOR_BERTOPIC = 5   # BERTopic needs a reasonable corpus
-_BERTOPIC_RANDOM_SEED = 42     # fixed seed — same file always gets same clusters
-
 
 def chunk_by_context(
     segments: List[Segment],
-    embedding_model_name: str = "all-MiniLM-L6-v2",
-    nr_topics: int | None = None,
-) -> Tuple[List[Chunk], List[ContextGroup]]:
+    embedding_model_name: str = 'all-MiniLM-L6-v2',
+) -> Tuple[List[Chunk], List[ContextGroup], float]:
     """
-    nr_topics=None  → Auto: BERTopic decides the natural number of topics.
-    nr_topics=N     → Manual: BERTopic finds all topics first, then merges
-                     down to exactly N (or the natural max if N > natural max).
-    """
-    """
-    Semantic context chunking — Scenario C (individual + merged).
+    Semantic context chunking using BERTopic (Auto mode only).
 
     Pipeline
     --------
-    1.  Paragraph-level base split across all segments
-    2.  sentence-transformers embeddings (one vector per paragraph)
-    3.  BERTopic topic assignment per paragraph
-    4.  Cosine similarity of each paragraph to its topic centroid
-    5.  Tag every individual paragraph Chunk with:
-            topic_id, topic_label, topic_words,
-            similarity_score, related_chunk_ids
-    6.  MERGE all paragraphs of the same topic → one merged Chunk
-        (joined with blank-line separator; source_paragraph_indices kept)
-    7.  Build ContextGroup per topic:
-            merged_chunk  = the one big SLM-ready block
-            source_chunks = individual paragraphs with full provenance
+    1. Paragraph-level base split across all segments
+    2. sentence-transformers embeddings (one vector per paragraph)
+    3. BERTopic topic assignment (fully automatic — no manual nr_topics)
+    4. Silhouette score computed on embeddings → overall coherence score
+    5. Cosine similarity of each paragraph to its topic centroid
+    6. Build ContextGroup per topic:
+         merged_chunk  = all paragraphs joined (SLM-ready)
+         source_chunks = individual paragraphs with similarity scores
 
     Returns
     -------
-    (individual_chunks, context_groups)
-    - individual_chunks : all paragraphs in original document order,
-                          each tagged with topic + similarity + related IDs
-    - context_groups    : one group per topic, each having:
-                              merged_chunk  (what the SLM receives)
-                              source_chunks (drill-down traceability)
+    (individual_chunks, context_groups, overall_coherence_score)
     """
     import numpy as np
 
-    # ── Step 1: base paragraph split ────────────────────────────────────────
-    base_chunks: List[Chunk] = chunk_by_paragraph(segments)
+    # ── Step 1: paragraph-level base split ──────────────────────────────────
+    paragraphs: List[str] = []
+    para_metas: List[Dict[str, Any]] = []
 
-    if len(base_chunks) < _MIN_CHUNKS_FOR_BERTOPIC:
+    for text, meta in segments:
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        for para in re.split(r'\n{2,}', text):
+            para = para.strip()
+            if para:
+                paragraphs.append(para)
+                para_metas.append(meta)
+
+    if len(paragraphs) < _MIN_PARAGRAPHS_FOR_BERTOPIC:
         logger.warning(
-            "chunk_by_context: only %d base chunks — "
-            "BERTopic needs ≥%d; falling back to paragraph chunking.",
-            len(base_chunks), _MIN_CHUNKS_FOR_BERTOPIC,
+            'chunk_by_context: only %d paragraph(s) — too few for BERTopic, '
+            'falling back to paragraph chunking.', len(paragraphs)
         )
-        for c in base_chunks:
-            c.method = "context"
-            c.metadata.update({"topic_id": 0, "topic_label": "context_0 (fallback)",
-                                "topic_words": [], "bertopic_used": False})
-        fallback_group = ContextGroup(
-            topic_id=0,
-            topic_label="context_0 (fallback)",
-            topic_words=[],
-            merged_chunk=Chunk(
-                chunk_id=str(uuid.uuid4()),
-                text="\n\n".join(c.text for c in base_chunks),
-                method="context",
-                chunk_index=0,
-                metadata={"topic_id": 0, "topic_label": "context_0 (fallback)",
-                           "bertopic_used": False, "paragraph_count": len(base_chunks),
-                           "source_paragraph_indices": list(range(len(base_chunks)))},
-            ),
-            source_chunks=base_chunks,
-        )
-        return base_chunks, [fallback_group]
+        fallback = chunk_by_paragraph(segments)
+        # Wrap each chunk in its own ContextGroup for UI consistency
+        groups = [
+            ContextGroup(
+                topic_id=i,
+                topic_label=f'Group {i + 1}',
+                topic_words=[],
+                merged_chunk=c,
+                source_chunks=[c],
+                coherence_score=1.0,
+            )
+            for i, c in enumerate(fallback)
+        ]
+        return fallback, groups, 1.0
 
-    # ── Step 2: embeddings ──────────────────────────────────────────────────
+    # ── Step 2: embeddings ───────────────────────────────────────────────────
     try:
         from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise ImportError(
-            "sentence-transformers is required for context chunking. "
-            "Install with: pip install sentence-transformers"
-        ) from exc
+    except ImportError:
+        raise RuntimeError('sentence-transformers is required for context chunking. '
+                           'Install it with: pip install sentence-transformers')
 
+    model = SentenceTransformer(embedding_model_name)
+    embeddings = model.encode(paragraphs, show_progress_bar=False, normalize_embeddings=True)
+    embeddings_np = np.array(embeddings)
+
+    # ── Step 3: BERTopic (Auto) ──────────────────────────────────────────────
     try:
         from bertopic import BERTopic
-    except ImportError as exc:
-        raise ImportError(
-            "bertopic is required for context chunking. "
-            "Install with: pip install bertopic"
-        ) from exc
+        from umap import UMAP
+        from hdbscan import HDBSCAN
+        from sklearn.feature_extraction.text import CountVectorizer
+    except ImportError as e:
+        raise RuntimeError(f'BERTopic dependencies missing: {e}. '
+                           'Install with: pip install bertopic umap-learn hdbscan')
 
-    texts = [c.text for c in base_chunks]
+    n = len(paragraphs)
+    n_components = max(2, min(5, n - 2))
+    n_neighbors  = max(2, min(5, n - 1))
 
-    logger.info("chunk_by_context: loading embedding model '%s'…", embedding_model_name)
-    st_model = SentenceTransformer(embedding_model_name)
-    embeddings = np.array(st_model.encode(texts, show_progress_bar=False))
-
-    # ── Step 3: BERTopic — always fit at max granularity, then reduce if needed ─
-    from sklearn.feature_extraction.text import CountVectorizer
-    from umap import UMAP
-
-    n_neighbors = min(5, len(texts) - 1)
-    n_components = max(2, min(5, len(texts) - 2))  # must be ≥ 2 and < n_samples
-    umap_model = UMAP(
-        n_neighbors=n_neighbors,
+    umap_model  = UMAP(
         n_components=n_components,
+        n_neighbors=n_neighbors,
         min_dist=0.0,
-        metric="cosine",
-        random_state=_BERTOPIC_RANDOM_SEED,  # same file → same clusters every run
+        metric='cosine',
+        random_state=_BERTOPIC_RANDOM_SEED,
     )
-    vectorizer = CountVectorizer(
-        stop_words="english",
-        min_df=1,
-        ngram_range=(1, 2),
+    hdbscan_model = HDBSCAN(
+        min_cluster_size=2,
+        min_samples=1,
+        metric='euclidean',
+        cluster_selection_method='eom',
+        prediction_data=True,
     )
+    vectorizer = CountVectorizer(stop_words='english', min_df=1)
+
     topic_model = BERTopic(
-        embedding_model=st_model,
         umap_model=umap_model,
+        hdbscan_model=hdbscan_model,
         vectorizer_model=vectorizer,
-        min_topic_size=2,
-        nr_topics="auto",
         verbose=False,
-        calculate_probabilities=False,
-    )
-    topics, _ = topic_model.fit_transform(texts, embeddings)
-
-    # Natural topics BERTopic found (excluding outlier -1)
-    unique_real_topics = [t for t in set(topics) if t != -1]
-    natural_count = len(unique_real_topics)
-    logger.info(
-        "chunk_by_context: BERTopic found %d natural topic(s); nr_topics request=%s",
-        natural_count, nr_topics,
     )
 
-    # Manual mode: reduce if user asked for fewer than natural count
-    if nr_topics is not None:
-        target = max(2, min(nr_topics, natural_count))  # clamp: 2 ≤ target ≤ natural
-        if target < natural_count:
-            logger.info(
-                "chunk_by_context: reducing %d → %d topics via reduce_topics()",
-                natural_count, target,
-            )
-            # reduce_topics() modifies the model in-place and returns self (BERTopic ≥0.16)
-            # Updated topic assignments live in topic_model.topics_ afterward
-            topic_model.reduce_topics(texts, nr_topics=target)
-            topics = topic_model.topics_
+    topics, _ = topic_model.fit_transform(paragraphs, embeddings=embeddings_np)
+
+    # ── Step 4: overall silhouette coherence score ───────────────────────────
+    overall_coherence = _silhouette_score(embeddings_np, topics)
+
+    # ── Step 5: per-paragraph similarity to topic centroid ──────────────────
+    # Build centroids per topic (mean of embeddings)
+    unique_topics = sorted(set(t for t in topics if t != -1))
+    centroids: Dict[int, np.ndarray] = {}
+    for tid in unique_topics:
+        idxs = [i for i, t in enumerate(topics) if t == tid]
+        centroids[tid] = embeddings_np[idxs].mean(axis=0)
+
+    # Get topic info for labels/words
+    try:
+        topic_info = topic_model.get_topic_info()
+    except Exception:
+        topic_info = None
+
+    def _topic_label(tid: int) -> str:
+        if topic_info is not None:
+            row = topic_info[topic_info['Topic'] == tid]
+            if not row.empty and 'Name' in row.columns:
+                return str(row.iloc[0]['Name'])
+        return f'Topic {tid}'
+
+    def _topic_words(tid: int) -> List[str]:
+        try:
+            return [w for w, _ in (topic_model.get_topic(tid) or [])[:5]]
+        except Exception:
+            return []
+
+    # ── Step 6: build Chunk objects per paragraph ────────────────────────────
+    all_chunks: List[Chunk] = []
+    topic_to_chunks: Dict[int, List[Chunk]] = {}
+
+    outlier_group_id   = str(uuid.uuid4())
+    outlier_topic_id   = -1
+
+    for i, (para, meta, topic_id) in enumerate(zip(paragraphs, para_metas, topics)):
+        # Similarity to centroid (cosine — embeddings already L2-normalised)
+        if topic_id != -1 and topic_id in centroids:
+            sim = float(np.dot(embeddings_np[i], centroids[topic_id]))
         else:
-            logger.info(
-                "chunk_by_context: requested %d ≥ natural %d — keeping all topics",
-                nr_topics, natural_count,
-            )
+            sim = 0.0
 
-    # ── Step 4: compute topic centroids + cosine similarity ─────────────────
-    # Group embedding indices by topic
-    topic_indices: Dict[int, List[int]] = {}
-    for idx, tid in enumerate(topics):
-        topic_indices.setdefault(tid, []).append(idx)
-
-    def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-        denom = (np.linalg.norm(a) * np.linalg.norm(b))
-        return float(np.dot(a, b) / denom) if denom > 0 else 0.0
-
-    # centroid per topic = mean of all its paragraph embeddings
-    topic_centroids: Dict[int, np.ndarray] = {
-        tid: embeddings[idxs].mean(axis=0)
-        for tid, idxs in topic_indices.items()
-    }
-    # cosine similarity of each paragraph to its topic centroid
-    similarities: List[float] = [
-        _cosine(embeddings[i], topic_centroids[topics[i]])
-        for i in range(len(base_chunks))
-    ]
-
-    # ── Step 5: tag individual paragraph chunks ──────────────────────────────
-    # First pass: collect chunk_ids per topic for related_chunk_ids
-    topic_chunk_ids: Dict[int, List[str]] = {}
-    for chunk, tid in zip(base_chunks, topics):
-        chunk.method = "context"
-        topic_chunk_ids.setdefault(tid, []).append(chunk.chunk_id)
-
-    raw_words_by_topic: Dict[int, List] = {
-        tid: (topic_model.get_topic(tid) or [])
-        for tid in set(topics)
-    }
-    label_by_topic: Dict[int, str] = {}
-    for tid, words in raw_words_by_topic.items():
-        kws = [w for w, _ in words[:3]]
-        label_by_topic[tid] = (
-            "context_" + "_".join(kws) if kws
-            else ("context_outlier" if tid == -1 else f"context_{tid}")
+        chunk = Chunk(
+            chunk_id=str(uuid.uuid4()),
+            text=para,
+            method='context',
+            chunk_index=i,
+            metadata={
+                **meta,
+                'topic_id': int(topic_id),
+                'topic_label': _topic_label(topic_id) if topic_id != -1 else 'outlier',
+                'topic_words': _topic_words(topic_id) if topic_id != -1 else [],
+            },
+            similarity_score=round(sim, 4),
         )
+        all_chunks.append(chunk)
+        topic_to_chunks.setdefault(topic_id, []).append(chunk)
 
-    # Second pass: attach all metadata to individual chunks
-    for i, (chunk, tid) in enumerate(zip(base_chunks, topics)):
-        raw_words = raw_words_by_topic[tid]
-        top_keywords = [w for w, _ in raw_words[:5]]
-        label = label_by_topic[tid]
+    # Cross-link related chunk IDs within each topic
+    for tid, group_chunks in topic_to_chunks.items():
+        ids = [c.chunk_id for c in group_chunks]
+        for c in group_chunks:
+            c.related_chunk_ids = [x for x in ids if x != c.chunk_id]
 
-        chunk.similarity_score = similarities[i]
-        chunk.related_chunk_ids = [
-            cid for cid in topic_chunk_ids[tid] if cid != chunk.chunk_id
-        ]
-        chunk.metadata.update({
-            "topic_id": tid,
-            "topic_label": label,
-            "topic_words": top_keywords,
-            "bertopic_used": True,
-        })
-
-    # ── Step 6 + 7: build merged chunks + ContextGroups ──────────────────
+    # ── Step 7: build ContextGroups ──────────────────────────────────────────
     context_groups: List[ContextGroup] = []
-    sorted_topic_ids = sorted(set(topics), key=lambda t: (t == -1, t))
 
-    for merge_idx, tid in enumerate(sorted_topic_ids):
-        idxs = sorted(topic_indices[tid])
-        source = [base_chunks[i] for i in idxs]
+    # Non-outlier topics
+    for tid in unique_topics:
+        group_chunks = topic_to_chunks.get(tid, [])
+        if not group_chunks:
+            continue
 
-        raw_words = raw_words_by_topic[tid]
-        label = label_by_topic[tid]
-        top_keywords = [w for w, _ in raw_words[:5]]
+        merged_text = '\n\n'.join(c.text for c in group_chunks)
+        avg_sim     = round(sum(c.similarity_score for c in group_chunks) / len(group_chunks), 4)
 
-        merged_text = "\n\n".join(c.text for c in source)
-        avg_sim = float(np.mean([similarities[i] for i in idxs]))
+        # Intra-group coherence (silhouette of this group vs others)
+        group_idxs = [i for i, t in enumerate(topics) if t == tid]
+        group_coherence = _silhouette_score(embeddings_np, topics, subset=group_idxs)
+
+        label = _topic_label(tid)
+        words = _topic_words(tid)
 
         merged_chunk = Chunk(
             chunk_id=str(uuid.uuid4()),
             text=merged_text,
-            method="context",
-            chunk_index=merge_idx,
-            similarity_score=avg_sim,
+            method='context_merged',
+            chunk_index=tid,
             metadata={
-                "topic_id": tid,
-                "topic_label": label,
-                "topic_words": top_keywords,
-                "bertopic_used": True,
-                "paragraph_count": len(source),
-                "avg_similarity_score": round(avg_sim, 4),   # ← UI reads this key
-                "source_paragraph_indices": idxs,
-                "source": source[0].metadata.get("source", ""),
-                "format_type": source[0].metadata.get("format_type", ""),
+                'topic_id': tid,
+                'topic_label': label,
+                'topic_words': words,
+                'avg_similarity_score': avg_sim,
+                'source_paragraph_count': len(group_chunks),
             },
+            similarity_score=avg_sim,
         )
 
         context_groups.append(ContextGroup(
             topic_id=tid,
             topic_label=label,
-            topic_words=raw_words,
+            topic_words=words,
             merged_chunk=merged_chunk,
-            source_chunks=source,
+            source_chunks=group_chunks,
+            coherence_score=group_coherence,
         ))
 
-    logger.info(
-        "chunk_by_context: %d paragraphs → %d topic group(s).",
-        len(base_chunks), len(context_groups),
-    )
-    # Return individual chunks in original doc order + context groups
-    return base_chunks, context_groups
+    # Outliers (topic_id == -1): each becomes its own 1-paragraph group
+    for c in topic_to_chunks.get(-1, []):
+        context_groups.append(ContextGroup(
+            topic_id=-1,
+            topic_label='outlier',
+            topic_words=[],
+            merged_chunk=c,
+            source_chunks=[c],
+            coherence_score=0.0,
+        ))
+
+    # Sort groups by topic_id for stable order
+    context_groups.sort(key=lambda g: (g.topic_id == -1, g.topic_id))
+
+    return all_chunks, context_groups, overall_coherence
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _silhouette_score(
+    embeddings: 'np.ndarray',
+    topics: List[int],
+    subset: List[int] | None = None,
+) -> float:
+    """
+    Silhouette score for topic assignments.
+    Returns a value in [-1, 1]; higher is better.
+    Returns 0.0 when there is not enough data to compute.
+    """
+    try:
+        import numpy as np
+        from sklearn.metrics import silhouette_score
+
+        valid_idx = [i for i, t in enumerate(topics) if t != -1]
+        if len(valid_idx) < 4:
+            return 0.0
+        valid_labels = [topics[i] for i in valid_idx]
+        if len(set(valid_labels)) < 2:
+            return 0.0
+        valid_emb = embeddings[valid_idx]
+        score = silhouette_score(valid_emb, valid_labels, metric='cosine')
+        return round(float(score), 4)
+    except Exception:
+        return 0.0

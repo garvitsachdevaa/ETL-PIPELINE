@@ -21,11 +21,6 @@ Pillow
 # Chandra OCR (VLM-based, GPU required)
 chandra-ocr>=0.1.8
 
-# ── Phase 3 — Chunking & Context ──────────────────────────────────────────────
-# Semantic chunking
-sentence-transformers>=2.7.0
-bertopic>=0.16.0
-
 # ── Phase 2 — VLM Layout Detection (Sprint 1) ──────────────────────────────
 # PaliGemma 2 model loading and inference
 transformers>=4.46.0

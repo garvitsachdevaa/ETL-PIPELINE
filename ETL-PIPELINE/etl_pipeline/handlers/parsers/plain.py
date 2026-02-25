@@ -218,7 +218,7 @@ def _parse_paragraphs(text: str) -> List[TextSection]:
     sections = []
     
     for para in paragraphs:
-        if not para:  # Only skip completely empty paragraphs
+        if not para:
             continue
         sections.append(
             TextSection(
