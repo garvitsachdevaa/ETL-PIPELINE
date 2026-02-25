@@ -205,9 +205,18 @@ def chunk_by_context(
         text = text.replace('\r\n', '\n').replace('\r', '\n')
         for para in re.split(r'\n{2,}', text):
             para = para.strip()
-            if para:
-                paragraphs.append(para)
-                para_metas.append(meta)
+            if not para:
+                continue
+            # Skip bare headings (## Foo, 1. Foo, ALL CAPS short lines) —
+            # they carry no semantic content for BERTopic and form noise clusters.
+            word_count = len(para.split())
+            is_heading = bool(_SECTION_HEADER.match(para)) or (
+                word_count <= 3 and not re.search(r'[.!?]', para)
+            )
+            if is_heading:
+                continue
+            paragraphs.append(para)
+            para_metas.append(meta)
 
     if len(paragraphs) < _MIN_PARAGRAPHS_FOR_BERTOPIC:
         logger.warning(
@@ -261,8 +270,11 @@ def chunk_by_context(
         metric='cosine',
         random_state=_BERTOPIC_RANDOM_SEED,
     )
+    # Scale min_cluster_size with document size so large docs get coherent
+    # groups instead of splitting into dozens of tiny clusters.
+    min_cs = max(2, n // 5)
     hdbscan_model = HDBSCAN(
-        min_cluster_size=2,
+        min_cluster_size=min_cs,
         min_samples=1,
         metric='euclidean',
         cluster_selection_method='eom',
@@ -278,6 +290,24 @@ def chunk_by_context(
     )
 
     topics, _ = topic_model.fit_transform(paragraphs, embeddings=embeddings_np)
+
+    # ── Reassign outliers (topic -1) to the nearest real topic ───────────────
+    # Outliers are paragraphs HDBSCAN couldn't confidently cluster. Instead of
+    # surfacing them as noise, assign each one to the topic whose centroid it
+    # is closest to (cosine similarity).
+    tmp_centroids: Dict[int, np.ndarray] = {}
+    for tid in set(t for t in topics if t != -1):
+        idxs = [i for i, t in enumerate(topics) if t == tid]
+        tmp_centroids[tid] = embeddings_np[idxs].mean(axis=0)
+
+    if tmp_centroids:  # only reassign when there are real topics
+        for i, t in enumerate(topics):
+            if t == -1:
+                best_tid = max(
+                    tmp_centroids,
+                    key=lambda tid: float(np.dot(embeddings_np[i], tmp_centroids[tid])),
+                )
+                topics[i] = best_tid
 
     # ── Step 4: overall silhouette coherence score ───────────────────────────
     overall_coherence = _silhouette_score(embeddings_np, topics)
@@ -297,11 +327,18 @@ def chunk_by_context(
         topic_info = None
 
     def _topic_label(tid: int) -> str:
+        """Return a clean human-readable label, stripping BERTopic's N_w_w_w prefix."""
         if topic_info is not None:
             row = topic_info[topic_info['Topic'] == tid]
             if not row.empty and 'Name' in row.columns:
-                return str(row.iloc[0]['Name'])
-        return f'Topic {tid}'
+                raw = str(row.iloc[0]['Name'])
+                # BERTopic names look like "0_cancer_patient_study" — strip leading N_
+                clean = re.sub(r'^-?\d+_', '', raw)
+                clean = clean.replace('_', ' ').title()
+                if clean:
+                    return clean
+        words = _topic_words(tid)
+        return ', '.join(words[:3]).title() if words else f'Group {tid + 1}'
 
     def _topic_words(tid: int) -> List[str]:
         try:
@@ -386,17 +423,6 @@ def chunk_by_context(
             merged_chunk=merged_chunk,
             source_chunks=group_chunks,
             coherence_score=group_coherence,
-        ))
-
-    # Outliers (topic_id == -1): each becomes its own 1-paragraph group
-    for c in topic_to_chunks.get(-1, []):
-        context_groups.append(ContextGroup(
-            topic_id=-1,
-            topic_label='outlier',
-            topic_words=[],
-            merged_chunk=c,
-            source_chunks=[c],
-            coherence_score=0.0,
         ))
 
     # Sort groups by topic_id for stable order

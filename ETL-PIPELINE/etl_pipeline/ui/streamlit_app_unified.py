@@ -769,10 +769,9 @@ def _show_flat_chunks(chunk_result):
 
 
 def _show_context_groups(chunk_result):
-    """Display BERTopic context groups with coherence score."""
+    """Display BERTopic context groups."""
     score = chunk_result.coherence_score
 
-    # Coherence badge
     if score >= 0.55:
         st.success(f"✅ Strong topic separation — coherence score: **{score:.2f}**")
     elif score >= 0.30:
@@ -780,35 +779,53 @@ def _show_context_groups(chunk_result):
     else:
         st.error(
             f"❌ Weak separation — coherence score: **{score:.2f}**  \n"
-            "The document may not have clearly distinct topics, or it may be too short."
+            "The document may not have clearly distinct topics, or may be too short for BERTopic."
         )
 
-    st.markdown(f"**{len(chunk_result.context_groups)} semantic group(s) detected**")
+    groups = [g for g in chunk_result.context_groups if g.topic_id != -1]
+    outliers = [g for g in chunk_result.context_groups if g.topic_id == -1]
+
+    st.markdown(f"**{len(groups)} semantic group(s) detected**"
+                + (f"  ·  {sum(len(g.source_chunks) for g in outliers)} outlier paragraph(s) unassigned" if outliers else ""))
     st.markdown("---")
 
-    for g in chunk_result.context_groups:
-        label = g.topic_label or f"Group {g.topic_id}"
-        words = ", ".join(g.topic_words) if g.topic_words else "—"
-        header = f"**{label}**  ·  {len(g.source_chunks)} paragraph(s)  ·  coherence {g.coherence_score:.2f}"
+    for g in groups:
+        label = g.topic_label or f"Group {g.topic_id + 1}"
+        n_para = len(g.source_chunks)
+        header = f"**{label}** — {n_para} paragraph(s)"
 
         with st.expander(header, expanded=True):
-            t1, t2 = st.tabs(["📦 Merged — SLM Input", "🔍 Individual Paragraphs"])
+            # Keyword tags
+            if g.topic_words:
+                st.markdown("**Keywords:** " + "  ".join(f"`{w}`" for w in g.topic_words[:6]))
 
-            with t1:
-                st.caption(f"Keywords: {words}")
-                avg_sim = g.merged_chunk.metadata.get("avg_similarity_score", 0.0) if g.merged_chunk else 0.0
-                st.caption(f"Avg similarity to centroid: {avg_sim:.2f}")
-                merged_text = g.merged_chunk.text if g.merged_chunk else ""
-                st.text_area("", value=merged_text, height=180, disabled=True,
-                             key=f"merged_{g.group_id}")
+            # Merged block (what gets sent to SLM)
+            merged_text = g.merged_chunk.text if g.merged_chunk else ""
+            st.text_area(
+                "Merged text (SLM input):",
+                value=merged_text,
+                height=160,
+                disabled=True,
+                key=f"merged_{g.group_id}",
+            )
 
-            with t2:
+            # Individual paragraphs — collapsible, so they don't clutter the view
+            if n_para > 1:
+                with st.expander(f"↳ {n_para} source paragraphs", expanded=False):
+                    for c in g.source_chunks:
+                        sim_pct = int(c.similarity_score * 100)
+                        badge = "🟢" if sim_pct >= 70 else "🟡" if sim_pct >= 40 else "🔴"
+                        st.caption(f"{badge} similarity {sim_pct}%")
+                        st.markdown(f"> {c.text}")
+                        st.divider()
+
+    # Outlier paragraphs at the bottom, collapsed by default
+    if outliers:
+        with st.expander("⚠️ Unassigned paragraphs (outliers)", expanded=False):
+            for g in outliers:
                 for c in g.source_chunks:
-                    sim_pct = int(c.similarity_score * 100)
-                    colour  = "🟢" if sim_pct >= 70 else "🟡" if sim_pct >= 40 else "🔴"
-                    st.markdown(f"{colour} similarity **{sim_pct}%**")
-                    st.text_area("", value=c.text, height=80, disabled=True,
-                                 key=f"src_{c.chunk_id}")
+                    st.markdown(f"> {c.text}")
+                    st.divider()
 
 
 if __name__ == "__main__":
