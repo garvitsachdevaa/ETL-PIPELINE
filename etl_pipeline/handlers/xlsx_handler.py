@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import Cell
 from ingestion.schemas import DocumentObject
-from handlers.binary_schema import BinaryDocument, Page, Region
+from handlers.binary_schema import BinaryDocument, Page, Block, Region
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,24 @@ def handle_xlsx(doc: DocumentObject) -> BinaryDocument:
         for sheet_idx, sheet_data in enumerate(content['worksheets']):
             regions = _create_sheet_regions(sheet_data, sheet_idx)
             
+            # Wrap regions in a Block for this worksheet
+            blocks = []
+            if regions:
+                blocks.append(Block(
+                    block_id=str(uuid.uuid4()),
+                    title=sheet_data['name'],
+                    label="worksheet",
+                    bbox=[0, 0, 100, 100],
+                    regions=regions,
+                    raw_text="",  # Could aggregate if needed
+                    confidence=0.9,
+                    metadata={"engine": "openpyxl", "sheet": sheet_data['name']}
+                ))
+            
             page = Page(
                 page_id=str(uuid.uuid4()),
                 page_number=sheet_idx + 1,
-                regions=regions,
+                blocks=blocks,
                 metadata={
                     "xlsx": True,
                     "sheet_name": sheet_data['name'],

@@ -6,7 +6,7 @@ import io
 import uuid
 from typing import List, Dict, Any, Optional
 from ingestion.schemas import DocumentObject
-from handlers.binary_schema import BinaryDocument, Page, Region
+from handlers.binary_schema import BinaryDocument, Page, Block, Region
 
 logger = logging.getLogger(__name__)
 
@@ -343,11 +343,25 @@ def handle_docx(doc: DocumentObject) -> BinaryDocument:
                 }
             ))
         
-        # Create page with all regions
+        # Wrap regions in a single Block for DOCX content
+        blocks = []
+        if regions:
+            blocks.append(Block(
+                block_id=str(uuid.uuid4()),
+                title="Document Content",
+                label="document",
+                bbox=[0, 0, 100, 100],
+                regions=regions,
+                raw_text="",  # Could aggregate if needed
+                confidence=0.9,
+                metadata={"engine": "python-docx"}
+            ))
+        
+        # Create page with blocks (not regions directly)
         page = Page(
             page_id=str(uuid.uuid4()),
             page_number=1,
-            regions=regions,
+            blocks=blocks,
             metadata={
                 "docx": True,
                 "extraction_stats": content['stats'],
